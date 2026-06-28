@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base: #0c0c0e; /* warm near-black, not navy */
+  --bg-surface: #141417; /* cards */
+  --bg-elevated: #1c1c21; /* modals, popovers */
+  --bg-pressed: #222228; /* tap states */
+
+  --accent-gold: #e8a020; /* PRIMARY — saffron gold. hero color. */
+  --accent-gold-dim: #e8a02026; /* gold at 15% for backgrounds */
+  --accent-teal: #00c896; /* gains, positive returns */
+  --accent-teal-dim: #00c89620;
+  --accent-red: #ff5757; /* losses */
+  --accent-red-dim: #ff575720;
+  --accent-purple: #8b5cf6; /* tribes, social layer */
+  --accent-purple-dim: #8b5cf620;
+  --accent-amber: #ffb020; /* caution — warnings that aren't losses. distinct from brand gold */
+  --accent-amber-dim: #ffb02020;
+  --accent-gold-soft: #e8a02066; /* gold at 40% — dashed upload border */
+  --accent-gold-faint: #e8a0200d; /* gold at 5% — upload zone fill */
+
+  --text-primary: #f0ede8; /* cream — warmer than pure white */
+  --text-secondary: #9ca3af;
+  --text-muted: #4b5563;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-jakarta), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  /* the phone frame lives centered on larger screens, full-bleed on mobile */
+  background: var(--bg-base);
+}
+
+/* tabular figures everywhere numbers matter — set per-element via .tabular */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* hide scrollbars on horizontal scroll rows while keeping scroll behaviour */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* dotted leader between a label and a value (rank "what moved you" rows) */
+.leader {
+  flex: 1;
+  margin: 0 8px;
+  border-bottom: 1px dotted var(--text-muted);
+  transform: translateY(-4px);
+  opacity: 0.5;
+}
+
+/* ───────── custom range slider — gold thumb, dark track, no native UI ───────── */
+input[type="range"].ants-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-pressed);
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"].ants-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  border: 3px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--accent-gold), 0 0 12px rgba(232, 160, 32, 0.5);
+  transition: transform 0.12s ease;
+}
+input[type="range"].ants-slider::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+}
+input[type="range"].ants-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-gold);
+  border: 3px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--accent-gold), 0 0 12px rgba(232, 160, 32, 0.5);
+}
+
+/* the bottom-nav fade: chrome dissolves into the background, no hard border */
+.nav-fade {
+  background: linear-gradient(
+    to top,
+    var(--bg-base) 55%,
+    rgba(12, 12, 14, 0.85) 80%,
+    rgba(12, 12, 14, 0)
+  );
+}
