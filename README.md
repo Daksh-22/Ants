@@ -12,30 +12,34 @@ It works for a single user with zero community. Community comes later — the ap
 
 ## Tech stack
 
-- **Next.js 14** (App Router) + **TypeScript** (strict)
-- **Tailwind CSS** with custom design tokens (CSS-variable backed)
-- **Framer Motion** for animation
-- **Recharts**, **lucide-react**
-- **Plus Jakarta Sans** via `next/font`
-- Mobile-first, **390px** viewport, **dark mode only**
-
-No UI component library — every component is custom.
+- **Frontend:** Next.js 14 (App Router), TypeScript strict, Tailwind (custom tokens), Framer Motion, Plus Jakarta Sans. Mobile-first 390px, dark mode only, no UI library — every component custom.
+- **Backend:** FastAPI (Python 3.12) — a real portfolio analysis engine, Claude AI (vision OCR, copy, chat), BM25 **RAG** over a curated knowledge base, WebSocket feed, Dockerized.
+- **AI surface:** screenshot → holdings via Claude vision · analysis copy punched up by Claude · **Ask Ants** RAG chat · an **MCP server** exposing the engine to Claude Desktop/agents.
 
 ## Getting started
 
 ```bash
+# 1. backend (terminal A)
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env            # add ANTHROPIC_API_KEY to enable AI (optional)
+.venv/bin/uvicorn main:app --reload --port 8000
+
+# 2. frontend (terminal B, repo root)
 npm install
 npm run dev
 # open http://localhost:3000  (redirects to /home)
 ```
 
-Other scripts: `npm run build`, `npm run start`, `npm run typecheck`, `npm run lint`.
+No API key? Everything still works: OCR falls back to the demo portfolio, chat answers from the knowledge base, analysis copy uses the built-in voice. The key just makes it smarter.
+
+Other scripts: `npm run build`, `npm run typecheck`, `npm run lint`. **Deploying: see [DEPLOYMENT.md](DEPLOYMENT.md)** (Railway + Vercel, ~10 min).
 
 ## The flow
 
 | Screen | What it is |
 | --- | --- |
-| `/home` | The hero. A state machine: **empty onboarding** (upload your screenshot) → **processing** (mocked OCR, ~2.4s) → **results** (your honest breakdown). The bottom nav appears only after results exist. |
+| `/home` | The hero. A state machine: **onboarding** (link broker / upload screenshot / enter manually) → **processing** (~2.4s while the backend analyzes) → **results** (your honest breakdown + the Ask Ants AI chat). The bottom nav appears only after results exist. |
 | `/portfolio` | Holdings (winners-first, weight bars), an honest audit, and SIPs. |
 | `/rank` | Where you stand in your cohort — a leaderboard strip + a live "climb faster" projection slider. |
 | `/tribes` | Community (intentionally early — "you're early" is a feature). |
@@ -43,26 +47,28 @@ Other scripts: `npm run build`, `npm run start`, `npm run typecheck`, `npm run l
 
 The **results breakdown** is the core loop: a health score ring, red/amber "here's the truth" cards, teal "what's working" cards, and numbered "your move" actions. Tapping any action opens a **fix sheet** with a concrete before→after; marking it done climbs the score ring, flips the card to teal, and persists your progress.
 
-> The OCR is **mocked** — any uploaded image (or the "add manually" link) runs the same demo analysis on the built-in Arjun Mehta portfolio.
+> Analysis is **real**: the backend engine prices your positions against a reference table, computes weights/returns/concentration, scores the portfolio, and generates flags with actionable fixes. With `ANTHROPIC_API_KEY` set, Claude reads screenshots (vision OCR), rewrites the copy in the Ants voice, and powers the chat. Without it, deterministic fallbacks keep the demo fully working.
 
 ## Project structure
 
 ```
-app/
-  home/        # state machine: empty → processing → results
-  portfolio/  rank/  tribes/  profile/
-  layout.tsx   # dark theme, fonts, AppState provider, bottom-nav wrapper
+app/                   # Next.js screens (home = onboarding → processing → results)
 components/
-  home/        # UploadEmptyState, Processing, Results, FixSheet, HealthRing, fixes.ts
-  ui/          # design system: Card, Button, Avatar, Badge, Slider, AnimatedNumber, Reveal, ...
-  layout/      # Header, BottomNav
-  app/         # AppState (analyzed + doneFixes, localStorage-persisted)
+  home/                # UploadEmptyState, ManualEntry, Processing, Results, FixSheet, AskAnts, HealthRing
+  ui/  layout/  app/   # design system · Header/BottomNav · AppState (localStorage-persisted)
+  tribes/              # SwarmRadar (live WebSocket), MirrorModal
 lib/
-  data/mock.ts        # single source of truth for all data (Arjun Mehta, Bengaluru)
-  utils/              # formatINR (Indian grouping ₹1,87,420), formatPercent, cn
-  hooks/              # useCountUp (scoreboard count-ups), useInView
-styles/globals.css    # CSS variables / color tokens
-tailwind.config.ts    # token → utility mapping
+  analysis/            # Analysis types + generated demo analysis (default.ts)
+  api/portfolio.ts     # typed client for every backend call (NEXT_PUBLIC_API_URL)
+  data/  utils/  hooks/
+backend/
+  main.py              # FastAPI: /api/analyze, /api/ocr/screenshot, /api/chat, /api/rag/search,
+                       #          /api/aa/* (AA mock), /api/execution/order, /ws/swarm-radar, /healthz
+  engine.py            # the real portfolio math: pricing, weights, score, flags, fixes
+  ai.py                # Claude: vision OCR, copy polish, RAG chat (all optional-key)
+  rag.py + knowledge/  # BM25 retrieval over curated investing docs
+  mcp_server.py        # MCP tools: analyze_portfolio, demo_portfolio, search_knowledge, ask_ants
+  Dockerfile + railway.json + requirements.txt
 ```
 
 ## Design rules (for contributors & AI tools)
@@ -75,7 +81,7 @@ tailwind.config.ts    # token → utility mapping
 
 ## Status
 
-Prototype with mocked data and a mocked OCR pipeline. Natural next steps: a real screenshot→holdings parser, wiring the action CTAs to real broker/AMC flows, and the community layer.
+Deployable beta. **Real:** analysis engine, AI OCR/copy/chat (with key), RAG, MCP server. **Still mocked/sandboxed:** Account Aggregator consent (swap in Setu/Finvu sandbox), order execution (broker API + compliance), Swarm Radar feed, reference prices (swap for a live quotes API). Serving real customers with AA/execution requires SEBI/RBI compliance work — see the honesty table in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Contributing
 

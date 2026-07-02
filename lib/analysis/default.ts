@@ -1,0 +1,207 @@
+/**
+ * The built-in demo analysis — Arjun Mehta's portfolio run through the REAL
+ * backend engine (backend/engine.py) and captured here, so the app gives the
+ * full experience with zero backend running. GENERATED — regenerate with:
+ *   curl -s localhost:8000/api/analyze/demo > backend/.demo-analysis.json
+ * then re-run the snippet in the repo README (Dev notes).
+ */
+
+import type { Analysis } from "./types";
+
+export const DEFAULT_ANALYSIS: Analysis = {
+  "source": "demo",
+  "generatedBy": "engine",
+  "summary": {
+    "totalValue": 104019.0,
+    "invested": 85930.0,
+    "returnsAbs": 18089.0,
+    "returnsPct": 21.1
+  },
+  "score": 66,
+  "scoreLabel": "Decent start.",
+  "attentionCount": 3,
+  "flags": [
+    {
+      "id": "single-concentration",
+      "severity": "red",
+      "label": "Concentration risk",
+      "body": "Dixon Technologies alone is 28% of your money. One bad quarter there and your whole portfolio feels it. That's not conviction, that's exposure.",
+      "fix": {
+        "id": "single-concentration",
+        "sheetTitle": "Trim Dixon Technologies",
+        "scoreDelta": 8,
+        "metricLabel": "In Dixon Technologies",
+        "metricBefore": "28%",
+        "metricAfter": "15%",
+        "steps": [
+          "Sell Dixon Technologies down toward 15% of your portfolio.",
+          "Redeploy into names that spread the same thesis.",
+          "Keep any single stock under 15–20%."
+        ],
+        "effort": "1–2 sell orders"
+      }
+    },
+    {
+      "id": "sector-concentration",
+      "severity": "amber",
+      "label": "Electronics is carrying everything",
+      "body": "47% of your portfolio is Electronics. Sector bets are fine — sector portfolios are how people give back two years of gains in one cycle.",
+      "fix": {
+        "id": "sector-concentration",
+        "sheetTitle": "Diversify beyond Electronics",
+        "scoreDelta": 6,
+        "metricLabel": "In Electronics",
+        "metricBefore": "47%",
+        "metricAfter": "35%",
+        "steps": [
+          "Cap Electronics at about a third of the portfolio.",
+          "Add 1–2 positions from unrelated sectors.",
+          "Rebalance quarterly, not daily."
+        ],
+        "effort": "2–3 orders"
+      }
+    },
+    {
+      "id": "no-international",
+      "severity": "amber",
+      "label": "100% India",
+      "body": "Everything you own trades in one country and one currency. A global ETF is the cheapest insurance you can buy against a purely local decade.",
+      "fix": {
+        "id": "no-international",
+        "sheetTitle": "Add an international ETF",
+        "scoreDelta": 5,
+        "metricLabel": "Global exposure",
+        "metricBefore": "1%",
+        "metricAfter": "10%",
+        "steps": [
+          "Start a small SIP into a global / US ETF.",
+          "Target ~10% of the portfolio over time.",
+          "This diversifies you out of India-only risk."
+        ],
+        "effort": "1 new SIP"
+      }
+    }
+  ],
+  "working": [
+    {
+      "id": "winners",
+      "label": "Your picks are printing",
+      "body": "Kaynes Technology and Dixon Technologies — +42.6%, +40.6%. Together they've added ₹14,430. Whatever you did there, do it again."
+    },
+    {
+      "id": "green-overall",
+      "label": "You're up overall",
+      "body": "+21.1% across the book. Most people your age are still 'planning to start'. You started. That's the hard part."
+    }
+  ],
+  "moves": [
+    {
+      "title": "Trim Dixon Technologies",
+      "cta": "See how",
+      "fixId": "single-concentration"
+    },
+    {
+      "title": "Diversify beyond Electronics",
+      "cta": "See how",
+      "fixId": "sector-concentration"
+    },
+    {
+      "title": "Add an international ETF",
+      "cta": "See how",
+      "fixId": "no-international"
+    }
+  ],
+  "holdings": [
+    {
+      "ticker": "KAYNES",
+      "name": "Kaynes Technology",
+      "sector": "Electronics",
+      "qty": 5.0,
+      "avg": 2890.0,
+      "cmp": 4120.0,
+      "value": 20600.0,
+      "invested": 14450.0,
+      "returnPct": 42.6,
+      "known": true,
+      "weightPct": 19.8
+    },
+    {
+      "ticker": "DIXON",
+      "name": "Dixon Technologies",
+      "sector": "Electronics",
+      "qty": 2.0,
+      "avg": 10200.0,
+      "cmp": 14340.0,
+      "value": 28680.0,
+      "invested": 20400.0,
+      "returnPct": 40.6,
+      "known": true,
+      "weightPct": 27.6
+    },
+    {
+      "ticker": "MIRAEFANG",
+      "name": "Mirae FANG+ ETF",
+      "sector": "International ETF",
+      "qty": 15.0,
+      "avg": 68.0,
+      "cmp": 94.0,
+      "value": 1410.0,
+      "invested": 1020.0,
+      "returnPct": 38.2,
+      "known": true,
+      "weightPct": 1.4
+    },
+    {
+      "ticker": "TCS",
+      "name": "TCS",
+      "sector": "IT",
+      "qty": 3.0,
+      "avg": 3680.0,
+      "cmp": 4127.0,
+      "value": 12381.0,
+      "invested": 11040.0,
+      "returnPct": 12.1,
+      "known": true,
+      "weightPct": 11.9
+    },
+    {
+      "ticker": "INFY",
+      "name": "Infosys",
+      "sector": "IT",
+      "qty": 8.0,
+      "avg": 1445.0,
+      "cmp": 1612.0,
+      "value": 12896.0,
+      "invested": 11560.0,
+      "returnPct": 11.6,
+      "known": true,
+      "weightPct": 12.4
+    },
+    {
+      "ticker": "HDFCBANK",
+      "name": "HDFC Bank",
+      "sector": "Banking",
+      "qty": 10.0,
+      "avg": 1590.0,
+      "cmp": 1628.0,
+      "value": 16280.0,
+      "invested": 15900.0,
+      "returnPct": 2.4,
+      "known": true,
+      "weightPct": 15.7
+    },
+    {
+      "ticker": "RELIANCE",
+      "name": "Reliance",
+      "sector": "Energy",
+      "qty": 4.0,
+      "avg": 2890.0,
+      "cmp": 2943.0,
+      "value": 11772.0,
+      "invested": 11560.0,
+      "returnPct": 1.8,
+      "known": true,
+      "weightPct": 11.3
+    }
+  ]
+};

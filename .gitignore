@@ -7,3 +7,12 @@ next-env.d.ts
 .DS_Store
 .env*.local
 npm-debug.log*
+
+# backend (python)
+backend/.venv/
+backend/__pycache__/
+backend/.env
+*.pyc
+
+# tooling artifacts
+repomix-output.xml

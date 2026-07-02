@@ -3,30 +3,25 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { BASE_SCORE, FIXES, type Fix } from "@/components/home/fixes";
+import type { FixPlan } from "@/lib/analysis/types";
 
 interface FixSheetProps {
-  fix: Fix;
-  /** ids already done — to compute the live "before" score and this fix's done state */
-  doneFixes: string[];
+  fix: FixPlan;
+  /** live score before applying this fix */
+  currentScore: number;
+  /** score once this fix is done */
+  projectedScore: number;
+  done: boolean;
   onClose: () => void;
   onMarkDone: (id: string) => void;
 }
 
-const sumDeltas = (ids: string[]) =>
-  FIXES.filter((f) => ids.includes(f.id)).reduce((s, f) => s + f.scoreDelta, 0);
-
 /**
  * Bottom sheet for a single fix: the problem, the steps, and a concrete
  * before→after — both the headline metric and the health score it unlocks.
- * "Mark as done" applies it; the reward (ring climb + gold pulse) plays on the
- * results screen behind the closing sheet.
+ * Fix content comes from the analysis (backend engine), not a static table.
  */
-export function FixSheet({ fix, doneFixes, onClose, onMarkDone }: FixSheetProps) {
-  const done = doneFixes.includes(fix.id);
-  const currentScore = Math.min(100, BASE_SCORE + sumDeltas(doneFixes));
-  const projectedScore = Math.min(100, currentScore + (done ? 0 : fix.scoreDelta));
-
+export function FixSheet({ fix, currentScore, projectedScore, done, onClose, onMarkDone }: FixSheetProps) {
   return (
     <>
       {/* backdrop */}
