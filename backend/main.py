@@ -104,6 +104,23 @@ async def analyze_demo(source: str = "demo"):
     return engine.demo_analysis(source=source)
 
 
+class CheckRequest(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=40)
+    positions: List[Position]
+
+
+@app.post("/api/check", tags=["Analysis"])
+async def check_tip(payload: CheckRequest):
+    """Tip Check — what buying this ticker actually does to YOUR portfolio.
+    Facts + tone from the engine; verdict wording sharpened by AI when enabled."""
+    try:
+        analysis = engine.analyze([p.model_dump() for p in payload.positions], source="check")
+        result = engine.check_ticker(analysis, payload.ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ai.polish_verdict(result, analysis["holdings"])
+
+
 # ─── 2. Screenshot OCR ───────────────────────────────────────────────────────
 
 @app.post("/api/ocr/screenshot", tags=["Analysis"])

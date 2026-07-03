@@ -95,6 +95,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(FIXES_KEY);
       localStorage.removeItem(ANALYSIS_KEY);
       localStorage.removeItem("ants:manual-positions");
+      // a different portfolio is a different story — the trend restarts
+      localStorage.removeItem("ants:score-history");
     } catch {
       // ignore
     }

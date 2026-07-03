@@ -84,6 +84,11 @@ export const DEFAULT_ANALYSIS: Analysis = {
   ],
   "working": [
     {
+      "id": "one-man-army",
+      "label": "Kaynes Technology is carrying the team",
+      "body": "Your top pick is +42.6% while your median pick sits at +12.1%. Study what you got right there — then ask the rest of your portfolio why it's just watching."
+    },
+    {
       "id": "winners",
       "label": "Your picks are printing",
       "body": "Kaynes Technology and Dixon Technologies — +42.6%, +40.6%. Together they've added ₹14,430. Whatever you did there, do it again."

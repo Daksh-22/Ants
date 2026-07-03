@@ -264,6 +264,22 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
             },
         })
 
+    # ---- winner dispersion: one pick carrying the whole book (observation, framed positive)
+    if len(holdings) >= 3:
+        top_ret = holdings[0]["returnPct"]
+        rets = sorted(h["returnPct"] for h in holdings)
+        median_ret = rets[len(rets) // 2]
+        if top_ret - median_ret > 25 and top_ret > 15:
+            working.append({
+                "id": "one-man-army",
+                "label": f"{holdings[0]['name']} is carrying the team",
+                "body": (
+                    f"Your top pick is +{top_ret:.1f}% while your median pick sits at "
+                    f"{median_ret:+.1f}%. Study what you got right there — then ask the rest of "
+                    f"your portfolio why it's just watching."
+                ),
+            })
+
     # ---- what's working
     winners = [h for h in holdings if h["returnPct"] >= 15]
     if winners:
@@ -337,3 +353,102 @@ DEMO_POSITIONS = [
 
 def demo_analysis(source: str = "demo") -> dict[str, Any]:
     return analyze(DEMO_POSITIONS, source=source)
+
+
+# ─── Tip Check — "should I buy this?" answered against YOUR portfolio ───────
+
+SIM_BUY_PCT = 10.0  # simulate the tip as a 10%-of-portfolio buy
+
+
+def check_ticker(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
+    """The pre-buy gut check. Given the user's analysis and a tipped ticker,
+    return what the buy actually does to THEIR portfolio — plus a verdict in
+    the Ants voice. tone: ok | caution | warn."""
+    holdings = analysis["holdings"]
+    total = analysis["summary"]["totalValue"]
+
+    key = _norm(ticker)
+    name, sector, cmp_ = KNOWN_STOCKS.get(key, (ticker.strip().upper() or key, "Other", 0.0))
+    known = key in KNOWN_STOCKS
+
+    # Canonicalize: find all holdings of the same company by matching to the display name
+    # This handles aliases like HDFC↔HDFCBANK which both map to "HDFC Bank"
+    canon_name = name if known else None
+    matching_holdings = [h for h in holdings if canon_name and h["name"] == canon_name] if known else []
+    own_weight = sum(h["weightPct"] for h in matching_holdings) if matching_holdings else 0.0
+    ownReturnPct = None
+    if matching_holdings:
+        # value-weighted average return across all matching holdings
+        total_value = sum(h["value"] for h in matching_holdings)
+        if total_value > 0:
+            ownReturnPct = sum(h["value"] * h["returnPct"] for h in matching_holdings) / total_value
+
+    sector_now = sum(h["weightPct"] for h in holdings if h["sector"] == sector) if known else 0.0
+    # buying SIM_BUY_PCT of current total: new total = 1.1×, sector gains the new slug
+    sector_after = ((sector_now / 100 * total) + (SIM_BUY_PCT / 100 * total)) / (total * (1 + SIM_BUY_PCT / 100)) * 100 if known else 0.0
+
+    facts = {
+        "ticker": key,
+        "name": name,
+        "sector": sector if known else None,
+        "known": known,
+        "cmp": cmp_ if known else None,
+        "alreadyOwnWeightPct": round(own_weight, 1) if matching_holdings else None,
+        "ownReturnPct": round(ownReturnPct, 1) if ownReturnPct is not None else None,
+        "sectorWeightNow": round(sector_now, 1) if known else None,
+        "sectorWeightAfter": round(sector_after, 1) if known else None,
+        "simulatedBuyPct": SIM_BUY_PCT,
+    }
+
+    # verdict ladder — most damning condition wins
+    if not known:
+        tone = "warn"
+        verdict = (
+            f"Can't price {facts['name']} — it's not in our coverage. If this tip came from a "
+            f"Telegram group or a YouTube thumbnail, that's already your answer. Unlisted, "
+            f"micro-cap, or misspelled: none of those deserve your money today."
+        )
+    elif own and own_weight >= 15:
+        tone = "warn"
+        verdict = (
+            f"You already hold {name} at {own_weight:.0f}% of your portfolio "
+            f"({own['returnPct']:+.1f}% so far). This tip isn't conviction, it's a rerun — "
+            f"adding more makes one stock your whole story."
+        )
+    elif sector_after > 45:
+        tone = "warn"
+        verdict = (
+            f"{name} would push {sector} to {sector_after:.0f}% of your money "
+            f"(from {sector_now:.0f}%). That's not a new idea — it's more of the same bet "
+            f"wearing a different name. Skip, or trim the sector first."
+        )
+    elif own:
+        tone = "caution"
+        verdict = (
+            f"You already own {name} ({own_weight:.0f}%, {own['returnPct']:+.1f}%). Averaging "
+            f"into a position you hold is fine — if it's a plan, not a dopamine buy. "
+            f"Decide the target weight before you tap buy."
+        )
+    elif sector_after > 30:
+        tone = "caution"
+        verdict = (
+            f"{name} is a real company, but {sector} would hit {sector_after:.0f}% of your "
+            f"portfolio. Buy it if you believe the sector thesis — just size it small and "
+            f"know you're doubling down, not diversifying."
+        )
+    elif sector_now > 10:
+        tone = "ok"
+        verdict = (
+            f"{name} is a new name in a sector you already hold — {sector} goes "
+            f"{sector_now:.0f}% → {sector_after:.0f}%. Reasonable spread within the theme; "
+            f"just make sure it's the better company, not just the newer tip."
+        )
+    else:
+        tone = "ok"
+        verdict = (
+            f"{name} ({sector}) would be genuinely new exposure — {sector} goes "
+            f"{sector_now:.0f}% → {sector_after:.0f}%. If you've done more homework than "
+            f"'someone said so', size it under {SIM_BUY_PCT:.0f}% and welcome aboard."
+        )
+
+    return {**facts, "tone": tone, "verdict": verdict}

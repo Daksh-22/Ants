@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Flame, Users, Repeat, ShieldCheck, Bell, ChevronRight, type LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
@@ -8,18 +9,15 @@ import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { SectionLabel } from "@/components/ui/SectionLabel";
-import { user, portfolio, rank, sips, tribe } from "@/lib/data/mock";
+import { useAppState } from "@/components/app/AppState";
+import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import { user, sips, tribe } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
+import { cn } from "@/lib/utils/cn";
 
-// longest running SIP = the investing streak (Snapchat-style momentum)
+// longest running SIP = the investing streak (demo mode only)
 const streakMonths = Math.max(...sips.map((s) => s.months));
-
-const stats = [
-  { label: "Net worth", value: formatINR(portfolio.totalValue) },
-  { label: "Returns", value: formatPercent(portfolio.returnsPct), tone: "teal" as const },
-  { label: "Wealth rank", value: `Top ${rank.wealthPercentile}%`, tone: "gold" as const },
-];
 
 const rows: { icon: LucideIcon; label: string; value: string }[] = [
   { icon: Users, label: "Your tribes", value: "1 joined" },
@@ -29,6 +27,39 @@ const rows: { icon: LucideIcon; label: string; value: string }[] = [
 ];
 
 export default function ProfilePage() {
+  const { analysis: stored, doneFixes } = useAppState();
+  const analysis = stored ?? DEFAULT_ANALYSIS;
+
+  // live score — same math as Results: base score + deltas from fixes marked done
+  const doneDelta = analysis.flags
+    .filter((f) => f.fix && doneFixes.includes(f.fix.id))
+    .reduce((s, f) => s + f.fix!.scoreDelta, 0);
+  const score = Math.min(100, analysis.score + doneDelta);
+
+  // truth-checks count for real portfolios — how many times they've looked
+  const [truthChecks, setTruthChecks] = useState(1);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ants:score-history");
+      const entries = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(entries)) setTruthChecks(Math.max(1, entries.length));
+    } catch {
+      // unreadable history — stay at 1
+    }
+  }, []);
+
+  const isDemo = analysis.source === "demo";
+
+  const stats = [
+    { label: "Net worth", value: formatINR(analysis.summary.totalValue), className: "text-primary" },
+    {
+      label: "Returns",
+      value: formatPercent(analysis.summary.returnsPct),
+      className: analysis.summary.returnsPct >= 0 ? "text-teal" : "text-red",
+    },
+    { label: "Health score", value: `${score}/100`, className: "text-gold" },
+  ];
+
   return (
     <div className="px-5 pt-7">
       {/* identity */}
@@ -48,23 +79,43 @@ export default function ProfilePage() {
         </div>
       </Reveal>
 
-      {/* streak hero — the dominant number */}
+      {/* hero — SIP streak in demo mode, truth checks on a real portfolio */}
       <Reveal index={1} className="mt-6">
-        <Card className="border-l-2 border-gold bg-gold-dim">
-          <SectionLabel>Investing streak</SectionLabel>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <Flame className="self-center text-gold" size={30} strokeWidth={2.4} />
-            <AnimatedNumber
-              value={streakMonths}
-              format={(n) => `${Math.round(n)}`}
-              className="text-display font-extrabold text-primary"
-            />
-            <span className="text-[16px] font-semibold text-secondary">months straight</span>
-          </div>
-          <p className="mt-2 text-body text-secondary">
-            Your money&apos;s been working while you sleep. Don&apos;t break it now.
-          </p>
-        </Card>
+        {isDemo ? (
+          <Card className="border-l-2 border-gold bg-gold-dim">
+            <SectionLabel>Investing streak</SectionLabel>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <Flame className="self-center text-gold" size={30} strokeWidth={2.4} />
+              <AnimatedNumber
+                value={streakMonths}
+                format={(n) => `${Math.round(n)}`}
+                className="text-display font-extrabold text-primary"
+              />
+              <span className="text-[16px] font-semibold text-secondary">months straight</span>
+            </div>
+            <p className="mt-2 text-body text-secondary">
+              Your money&apos;s been working while you sleep. Don&apos;t break it now.
+            </p>
+          </Card>
+        ) : (
+          <Card className="border-l-2 border-gold bg-gold-dim">
+            <SectionLabel>Truth streak</SectionLabel>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <Flame className="self-center text-gold" size={30} strokeWidth={2.4} />
+              <AnimatedNumber
+                value={truthChecks}
+                format={(n) => `${Math.round(n)}`}
+                className="text-display font-extrabold text-primary"
+              />
+              <span className="text-[16px] font-semibold text-secondary">
+                truth checks and counting
+              </span>
+            </div>
+            <p className="mt-2 text-body text-secondary">
+              Most people never look. You keep looking.
+            </p>
+          </Card>
+        )}
       </Reveal>
 
       {/* quick stats */}
@@ -73,13 +124,7 @@ export default function ProfilePage() {
           {stats.map((s) => (
             <Card key={s.label} className="p-3.5">
               <SectionLabel className="text-[10px]">{s.label}</SectionLabel>
-              <p
-                className={`mt-1 text-[15px] font-bold tabular ${
-                  s.tone === "teal" ? "text-teal" : s.tone === "gold" ? "text-gold" : "text-primary"
-                }`}
-              >
-                {s.value}
-              </p>
+              <p className={cn("mt-1 text-[15px] font-bold tabular", s.className)}>{s.value}</p>
             </Card>
           ))}
         </div>

@@ -1,22 +1,51 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { useMemo } from "react";
+import Link from "next/link";
+import { ArrowRight, Check } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { HoldingRow } from "@/components/ui/HoldingRow";
 import { SectionLabel } from "@/components/ui/SectionLabel";
-import { portfolio, holdings, holdingsTotalValue, sips } from "@/lib/data/mock";
+import { useAppState } from "@/components/app/AppState";
+import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import { sips, type ComputedHolding } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
+import { cn } from "@/lib/utils/cn";
 
-// the most saturated teal bar belongs to the biggest winner — everything
-// else is scaled relative to it, so HDFC (+2.4%) and Reliance (+1.8%) fade out.
-const maxReturn = Math.max(...holdings.map((h) => h.returnPct));
-
+/**
+ * The Portfolio tab renders the SAME live analysis as home — manual /
+ * screenshot / broker, falling back to the built-in demo. Holdings, P&L and
+ * the audit all come off the analysis object; nothing here is invented.
+ */
 export default function PortfolioPage() {
+  const { analysis: stored, doneFixes } = useAppState();
+  const analysis = stored ?? DEFAULT_ANALYSIS;
+
+  // adapt analysis holdings (already winners-first) to the HoldingRow shape.
+  // the most saturated bar belongs to the biggest mover — win or loss —
+  // everything else fades relative to it.
+  const { rows, maxAbsReturn } = useMemo(() => {
+    const max = analysis.holdings.reduce((m, h) => Math.max(m, Math.abs(h.returnPct)), 0);
+    const adapted: ComputedHolding[] = analysis.holdings.map((h) => ({
+      name: h.name,
+      sector: h.sector,
+      shares: h.qty,
+      avg: h.avg,
+      cmp: h.cmp,
+      unit: h.name.includes("ETF") ? "units" : "shares",
+      value: h.value,
+      investedValue: h.invested,
+      returnPct: h.returnPct,
+    }));
+    return { rows: adapted, maxAbsReturn: max };
+  }, [analysis]);
+
+  const flagCount = analysis.flags.length;
+
   return (
     <div className="px-5 pt-7">
       {/* ───── Page title ───── */}
@@ -27,26 +56,26 @@ export default function PortfolioPage() {
       {/* ───── P&L hero — floats on the base, no container ───── */}
       <Reveal index={1} className="pb-7 pt-5">
         <AnimatedNumber
-          value={portfolio.totalValue}
+          value={analysis.summary.totalValue}
           format={(n) => formatINR(n)}
           className="block text-display font-extrabold text-primary"
         />
         <p className="mt-2 text-[15px]">
           <AnimatedNumber
-            value={portfolio.returnsPct}
+            value={analysis.summary.returnsPct}
             format={(n) => formatPercent(n)}
-            className="font-bold text-teal"
+            className={cn("font-bold", analysis.summary.returnsPct >= 0 ? "text-teal" : "text-red")}
           />
           <span className="text-muted">{"  "}</span>
           <AnimatedNumber
-            value={portfolio.returnsAbs}
+            value={analysis.summary.returnsAbs}
             format={(n) => formatINR(n, { signed: true })}
-            className="font-bold text-teal"
+            className={cn("font-bold", analysis.summary.returnsAbs >= 0 ? "text-teal" : "text-red")}
           />
           <span className="text-secondary"> total</span>
         </p>
         <p className="mt-1 text-[13px] text-muted">
-          Invested <span className="tabular">{formatINR(portfolio.invested)}</span>
+          Invested <span className="tabular">{formatINR(analysis.summary.invested)}</span>
         </p>
       </Reveal>
 
@@ -56,77 +85,88 @@ export default function PortfolioPage() {
       </Reveal>
       <Reveal index={3}>
         <div>
-          {holdings.map((h) => (
+          {rows.map((h, i) => (
             <HoldingRow
-              key={h.name}
+              key={analysis.holdings[i].ticker || h.name}
               holding={h}
-              weight={h.value / holdingsTotalValue}
-              intensity={h.returnPct / maxReturn}
+              weight={analysis.holdings[i].weightPct / 100}
+              intensity={maxAbsReturn > 0 ? Math.abs(h.returnPct) / maxAbsReturn : 0.3}
             />
           ))}
         </div>
       </Reveal>
 
       {/* ───── Honest audit — the smart-friend telling you the truth ───── */}
-      <Reveal index={4}>
-        <h2 className="mb-3 mt-8 text-[18px] font-semibold text-primary">
-          What&apos;s actually going on
-        </h2>
-      </Reveal>
+      {flagCount > 0 && (
+        <>
+          <Reveal index={4}>
+            <h2 className="mb-3 mt-8 text-[18px] font-semibold text-primary">
+              What&apos;s actually going on
+            </h2>
+          </Reveal>
 
-      <div className="space-y-3">
-        <Reveal index={5}>
-          <Card className="border-l-[3px] border-red">
-            <p className="text-[15px] font-semibold text-primary">
-              HDFC + Reliance = 24% of your money
-            </p>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-secondary">
-              You say AI infra. Your money says boomer index. Either believe your own thesis
-              or stop saying it.
-            </p>
-          </Card>
-        </Reveal>
+          <div className="space-y-3">
+            {analysis.flags.map((flag, i) => {
+              const isDone = !!flag.fix && doneFixes.includes(flag.fix.id);
+              const toneColor = isDone ? "teal" : flag.severity === "red" ? "red" : "amber";
+              return (
+                <Reveal key={flag.id} index={5 + i}>
+                  <Card
+                    className={cn(
+                      "border-l-[3px]",
+                      toneColor === "red" ? "border-red" : toneColor === "amber" ? "border-amber" : "border-teal"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          toneColor === "red" ? "bg-red" : toneColor === "amber" ? "bg-amber" : "bg-teal"
+                        )}
+                      />
+                      <span className={cn("text-label uppercase", isDone ? "text-teal" : "text-muted")}>{flag.label}</span>
+                    </div>
+                    <p className="mt-2.5 text-[14px] leading-[1.55] text-secondary">{flag.body}</p>
+                    {isDone ? (
+                      <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-teal-dim px-2.5 py-1 text-[12px] font-semibold text-teal">
+                        <Check size={12} strokeWidth={3} />
+                        Sorted
+                      </span>
+                    ) : (
+                      flag.fix && (
+                        <Link
+                          href="/home"
+                          className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-gold"
+                        >
+                          Fix it on Home
+                          <ArrowRight size={13} strokeWidth={2.6} />
+                        </Link>
+                      )
+                    )}
+                  </Card>
+                </Reveal>
+              );
+            })}
+          </div>
+        </>
+      )}
 
-        <Reveal index={6}>
-          <Card className="border-l-[3px] border-amber">
-            <p className="text-[15px] font-semibold text-primary">
-              PGIM is on a regular plan
-            </p>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-secondary">
-              You&apos;re paying ₹387 a year to a middleman for no reason. This takes 4 minutes
-              to fix.
-            </p>
-            <Button variant="link" className="mt-3">
-              Switch to Direct
-              <ArrowRight size={14} strokeWidth={2.6} />
-            </Button>
-          </Card>
-        </Reveal>
-
-        <Reveal index={7}>
-          <Card className="border-l-[3px] border-amber">
-            <p className="text-[15px] font-semibold text-primary">
-              3 funds, 1.4 funds worth of stocks
-            </p>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-secondary">
-              Your Mirae Large Cap and Quant Small Cap share 31% of the same companies.
-              Overlap isn&apos;t diversification.
-            </p>
-          </Card>
-        </Reveal>
-      </div>
-
-      {/* ───── SIPs — same plain full-width list idiom as holdings ───── */}
-      <Reveal index={8}>
-        <SectionLabel className="mb-1 mt-8">Your SIPs</SectionLabel>
-      </Reveal>
-      <Reveal index={9}>
-        <div>
-          {sips.map((sip) => (
-            <SipRow key={sip.name} sip={sip} />
-          ))}
-        </div>
-      </Reveal>
+      {/* ───── SIPs — demo portfolio only. A real analysis has no SIP data,
+             and we don't show numbers we didn't measure. ───── */}
+      {analysis.source === "demo" && (
+        <>
+          <Reveal index={5 + flagCount}>
+            <SectionLabel className="mb-1 mt-8">Your SIPs</SectionLabel>
+          </Reveal>
+          <Reveal index={6 + flagCount}>
+            <div>
+              {sips.map((sip) => (
+                <SipRow key={sip.name} sip={sip} />
+              ))}
+            </div>
+          </Reveal>
+        </>
+      )}
     </div>
   );
 }

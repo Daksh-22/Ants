@@ -82,6 +82,35 @@ export function askAnts(question: string, analysis?: Analysis | null): Promise<C
   });
 }
 
+// ─── Tip Check (the pre-buy gut check) ──────────────────────────────────────
+
+export interface TipCheckResult {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  known: boolean;
+  cmp: number | null;
+  /** % of the portfolio already in this exact stock (null if not held) */
+  alreadyOwnWeightPct: number | null;
+  /** current return on the existing position, if held */
+  ownReturnPct: number | null;
+  /** sector weight today vs after a simulated buy of simulatedBuyPct */
+  sectorWeightNow: number | null;
+  sectorWeightAfter: number | null;
+  simulatedBuyPct: number;
+  tone: "ok" | "caution" | "warn";
+  verdict: string;
+}
+
+/** Run a tip past the engine: what would buying this do to YOUR portfolio? */
+export function checkTip(ticker: string, positions: RawPosition[]): Promise<TipCheckResult> {
+  return request<TipCheckResult>("/api/check", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ ticker, positions }),
+  });
+}
+
 // ─── Execution (Swarm Radar) ────────────────────────────────────────────────
 
 export async function executeProtectedTrade(sector: string) {

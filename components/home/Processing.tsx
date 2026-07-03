@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Check, Loader2 } from "lucide-react";
 
-// personalized to Arjun's portfolio — feels like it's really reading your holdings
+// honest generic steps — no invented specifics; the real analysis speaks for itself
 const STEPS: { label: string; detail: string }[] = [
-  { label: "Reading your holdings", detail: "7 found" },
-  { label: "Spotting concentration", detail: "HDFC + Reliance" },
-  { label: "Checking SIP overlap", detail: "Mirae × Quant" },
-  { label: "Building your breakdown", detail: "" },
+  { label: "Reading your positions…", detail: "" },
+  { label: "Pricing against the market…", detail: "" },
+  { label: "Stress-testing for concentration…", detail: "" },
+  { label: "Writing the truth…", detail: "" },
 ];
 
 /**

@@ -9,9 +9,17 @@ import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
+import dynamic from "next/dynamic";
 import { HealthRing } from "@/components/home/HealthRing";
 import { FixSheet } from "@/components/home/FixSheet";
 import { AskAnts } from "@/components/home/AskAnts";
+import { TipCheck } from "@/components/home/TipCheck";
+
+// recharts is heavy — load the sparkline lazily so first paint stays light
+const ScoreTrend = dynamic(
+  () => import("@/components/home/ScoreTrend").then((m) => m.ScoreTrend),
+  { ssr: false }
+);
 import { useAppState } from "@/components/app/AppState";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import type { AnalysisFlag, FixPlan } from "@/lib/analysis/types";
@@ -185,6 +193,11 @@ export function Results() {
           {analysis.note && <p className="mt-2 text-[11px] text-muted">{analysis.note}</p>}
         </Reveal>
 
+        {/* the score gets a pulse — renders only once there's history */}
+        <Reveal index={2}>
+          <ScoreTrend score={score} />
+        </Reveal>
+
         {/* the truth */}
         {analysis.flags.length > 0 && (
           <section>
@@ -279,25 +292,32 @@ export function Results() {
           </section>
         )}
 
+        {/* the pre-buy gut check — the tool you come back for */}
+        {analysis.source !== "demo" && (
+          <Reveal index={11}>
+            <TipCheck analysis={analysis} />
+          </Reveal>
+        )}
+
         {/* the one community door — not a feed */}
-        <Reveal index={11}>
+        <Reveal index={12}>
           <Card className="border-l-[3px] border-purple">
             <p className="text-[14px] leading-[1.5] text-secondary">
-              <span className="font-semibold text-primary">18,420 other investors</span> are holding
-              similar positions.
+              <span className="font-semibold text-primary">Tribes are coming</span> — compare notes
+              with investors on the same thesis, not influencers with a course to sell.
             </p>
             <Link
               href="/tribes"
               className="mt-3 inline-flex items-center gap-1 text-[14px] font-semibold text-gold"
             >
-              Join the AI Infrastructure tribe
+              Peek at the tribes
               <ArrowRight size={14} strokeWidth={2.6} />
             </Link>
           </Card>
         </Reveal>
 
         {/* replay / analyze a fresh portfolio */}
-        <Reveal index={12}>
+        <Reveal index={13}>
           <button
             onClick={reset}
             className="mx-auto flex items-center gap-1.5 pb-2 text-[12px] text-muted"

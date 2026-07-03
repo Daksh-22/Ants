@@ -161,6 +161,42 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
         return analysis
 
 
+# ─── 2b. Punch up a Tip Check verdict ───────────────────────────────────────
+
+def polish_verdict(check: dict[str, Any], holdings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rewrite the tip-check verdict with full portfolio context. Facts and
+    tone are computed by the engine and must not change; AI only sharpens the
+    words. Returns input unchanged on any failure."""
+    client = _get_client()
+    if client is None:
+        return check
+    try:
+        slim = [{k: h[k] for k in ("name", "sector", "weightPct", "returnPct")} for h in holdings]
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=300,
+            system=VOICE,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "A user asked whether to buy a tipped stock. Engine facts (all true, keep them):\n"
+                    + json.dumps({k: v for k, v in check.items() if k != "verdict"})
+                    + "\nTheir holdings:\n" + json.dumps(slim)
+                    + "\n\nCurrent verdict:\n" + check["verdict"]
+                    + "\n\nRewrite the verdict — same conclusion and tone class "
+                    f"('{check['tone']}'), sharper and more personal to their book. Max 3 "
+                    "sentences. Return ONLY the rewritten verdict text."
+                ),
+            }],
+        )
+        text = "".join(b.text for b in msg.content if b.type == "text").strip()
+        if 20 < len(text) < 600:
+            check["verdict"] = text
+    except Exception:
+        pass
+    return check
+
+
 # ─── 3. Ask Ants — RAG-grounded chat ────────────────────────────────────────
 
 OFFLINE_ANSWER = (
