@@ -8,23 +8,27 @@ type CardProps = {
   variant?: "surface" | "elevated";
   /** adds tactile scale-0.97 feedback on tap */
   pressable?: boolean;
+  /** gold ambient glow — reserved for hero/milestone cards */
+  glow?: boolean;
   className?: string;
   children: ReactNode;
 } & Omit<HTMLMotionProps<"div">, "children" | "ref">;
 
 const variantClasses: Record<NonNullable<CardProps["variant"]>, string> = {
-  surface: "bg-surface",
-  elevated: "bg-elevated",
+  surface: "card-sheen",
+  elevated: "card-sheen-elevated",
 };
 
 /**
- * Base card. 16px radius, 20px padding by default. Everything tappable gets
- * the scale-0.97 spring-back feedback. Specific accents (gold/red/amber left
- * borders) are applied via className at the call site.
+ * Base card. 16px radius, 20px padding. Every card carries the sheen
+ * treatment: hairline border, faint top-light, soft drop shadow — depth
+ * without noise. Everything tappable gets the scale-0.97 spring-back.
+ * Specific accents (gold/red/amber left borders) come via className.
  */
 export function Card({
   variant = "surface",
   pressable = false,
+  glow = false,
   className,
   children,
   ...rest
@@ -36,6 +40,7 @@ export function Card({
       className={cn(
         "rounded-2xl p-5",
         variantClasses[variant],
+        glow && "shadow-glow-gold",
         pressable && "cursor-pointer select-none",
         className
       )}

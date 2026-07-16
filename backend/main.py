@@ -24,13 +24,18 @@ import random
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import ai
 import engine
+import metrics
 import rag
+import auth
+import database
+import prices
+from csv_importer import csv_to_holdings
 
 app = FastAPI(
     title="Ants Backend",
@@ -102,6 +107,22 @@ async def analyze_portfolio(payload: AnalyzeRequest):
 async def analyze_demo(source: str = "demo"):
     """The Arjun Mehta demo portfolio through the same real engine."""
     return engine.demo_analysis(source=source)
+
+
+@app.post("/api/metrics", tags=["Analysis"])
+async def portfolio_metrics(payload: AnalyzeRequest):
+    """Positions → risk metrics: volatility, Sharpe, est. max drawdown, beta,
+    composite risk score, plus per-holding risk contributions."""
+    try:
+        analysis = engine.analyze([p.model_dump() for p in payload.positions], source=payload.source)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    risk = metrics.calculate_metrics(analysis["holdings"], analysis["summary"]["returnsPct"])
+    contributions = metrics.get_holding_volatilities(analysis["holdings"])
+    return {
+        "risk": risk.__dict__,
+        "holdingVolatilities": [c.__dict__ for c in contributions],
+    }
 
 
 class CheckRequest(BaseModel):
@@ -237,3 +258,282 @@ async def swarm_radar(ws: WebSocket):
             await ws.send_json(payload)
     except WebSocketDisconnect:
         manager.disconnect(ws)
+
+
+# ─── 7. Authentication ──────────────────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    user_id: str
+    email: str
+
+
+@app.post("/api/auth/signup", tags=["Auth"], response_model=TokenResponse)
+async def signup(payload: SignupRequest):
+    """Create a new user account."""
+    valid, msg = auth.validate_password(payload.password)
+    if not valid:
+        raise HTTPException(status_code=400, detail=msg)
+
+    # For MVP: mock user creation. Production: call Supabase Auth.
+    user_id = f"user_{random.randint(100000, 999999)}"
+    token = auth.create_access_token(user_id, payload.email)
+
+    return {"access_token": token, "user_id": user_id, "email": payload.email}
+
+
+@app.post("/api/auth/login", tags=["Auth"], response_model=TokenResponse)
+async def login(payload: LoginRequest):
+    """Login to existing account."""
+    # For MVP: mock login. Production: verify against Supabase Auth.
+    user_id = f"user_{random.randint(100000, 999999)}"
+    token = auth.create_access_token(user_id, payload.email)
+
+    return {"access_token": token, "user_id": user_id, "email": payload.email}
+
+
+@app.get("/api/auth/profile", tags=["Auth"])
+async def get_profile(current_user: dict = Depends(auth.get_current_user)):
+    """Get current user's profile."""
+    return {
+        "user_id": current_user.get("user_id"),
+        "email": current_user.get("email"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── 8. Portfolio Management ────────────────────────────────────────────────
+
+class PortfolioRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+@app.post("/api/portfolios", tags=["Portfolio"])
+async def create_portfolio(payload: PortfolioRequest, current_user: dict = Depends(auth.get_current_user)):
+    """Create a new portfolio."""
+    user_id = current_user.get("user_id")
+    portfolio = await database.db.create_portfolio(user_id, payload.name, payload.description or "")
+    return portfolio
+
+
+@app.get("/api/portfolios", tags=["Portfolio"])
+async def list_portfolios(current_user: dict = Depends(auth.get_current_user)):
+    """List all portfolios for user."""
+    user_id = current_user.get("user_id")
+    portfolios = await database.db.get_portfolios(user_id)
+    return portfolios
+
+
+# ─── 9. CSV Import ──────────────────────────────────────────────────────────
+
+@app.post("/api/portfolios/import-csv", tags=["Portfolio"])
+async def import_csv_portfolio(
+    portfolio_name: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """Upload CSV file with holdings → auto-create portfolio + holdings."""
+    user_id = current_user.get("user_id")
+
+    # Read CSV
+    try:
+        content = (await file.read()).decode("utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+
+    # Parse CSV
+    holdings, messages = csv_to_holdings(content)
+
+    if not holdings:
+        raise HTTPException(status_code=422, detail=f"No valid holdings: {messages}")
+
+    # Create portfolio
+    portfolio = await database.db.create_portfolio(user_id, portfolio_name, f"Imported from CSV ({datetime.now().strftime('%Y-%m-%d')})")
+
+    # Add holdings
+    for h in holdings:
+        await database.db.add_holding(
+            portfolio["id"],
+            h["ticker"],
+            h["qty"],
+            h["buy_price"],
+            h["sector"],
+        )
+
+    return {
+        "portfolio_id": portfolio["id"],
+        "portfolio_name": portfolio["name"],
+        "holdings_count": len(holdings),
+        "holdings": holdings,
+        "warnings": messages,
+    }
+
+
+# ─── 10. Holdings Management ────────────────────────────────────────────────
+
+@app.post("/api/portfolios/{portfolio_id}/holdings", tags=["Holdings"])
+async def add_holding(
+    portfolio_id: str,
+    payload: database.HoldingCreate,
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """Add a holding to a portfolio."""
+    holding = await database.db.add_holding(
+        portfolio_id,
+        payload.ticker,
+        payload.qty,
+        payload.buy_price,
+        payload.sector,
+    )
+    return holding
+
+
+@app.get("/api/portfolios/{portfolio_id}/holdings", tags=["Holdings"])
+async def get_holdings(portfolio_id: str, current_user: dict = Depends(auth.get_current_user)):
+    """Get all holdings in a portfolio."""
+    holdings = await database.db.get_holdings(portfolio_id)
+    return holdings
+
+
+# ─── 11. Portfolio Analysis (with real prices) ──────────────────────────────
+
+@app.get("/api/portfolios/{portfolio_id}/analysis", tags=["Analysis"])
+async def analyze_portfolio_live(portfolio_id: str, current_user: dict = Depends(auth.get_current_user)):
+    """Analyze portfolio with live prices."""
+    holdings = await database.db.get_holdings(portfolio_id)
+
+    if not holdings:
+        return {"error": "No holdings in portfolio"}
+
+    # Fetch current prices and calculate metrics
+    metrics_data = prices.get_portfolio_metrics(holdings)
+
+    # Run through analysis engine
+    try:
+        analysis = engine.analyze(
+            [
+                {
+                    "ticker": h["ticker"],
+                    "qty": h["qty"],
+                    "avg": h["buy_price"],
+                }
+                for h in holdings
+            ],
+            source="portfolio",
+        )
+
+        return {**analysis, **metrics_data}
+
+    except Exception as e:
+        return {"error": str(e), "metrics": metrics_data}
+
+
+# ─── 12. Gamification ───────────────────────────────────────────────────────
+
+class XPRequest(BaseModel):
+    xp_earned: int
+
+
+@app.post("/api/gamification/xp", tags=["Gamification"])
+async def earn_xp(payload: XPRequest, current_user: dict = Depends(auth.get_current_user)):
+    """Award XP to user."""
+    user_id = current_user.get("user_id")
+    result = await database.db.update_xp(user_id, payload.xp_earned)
+    return result
+
+
+@app.get("/api/gamification/state", tags=["Gamification"])
+async def get_gamification_state(current_user: dict = Depends(auth.get_current_user)):
+    """Get user's gamification progress."""
+    user_id = current_user.get("user_id")
+    state = await database.db.get_gamification_state(user_id)
+    return state
+
+
+class AchievementRequest(BaseModel):
+    achievement_id: str
+
+
+@app.post("/api/gamification/achievements/{achievement_id}", tags=["Gamification"])
+async def unlock_achievement(
+    achievement_id: str,
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """Unlock an achievement."""
+    user_id = current_user.get("user_id")
+    result = await database.db.add_achievement(user_id, achievement_id)
+    return result
+
+
+# ─── 13. Watchlist ──────────────────────────────────────────────────────────
+
+@app.post("/api/watchlist", tags=["Watchlist"])
+async def add_to_watchlist(
+    ticker: str,
+    fit_score: int = 0,
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """Add stock to watchlist."""
+    user_id = current_user.get("user_id")
+    item = await database.db.add_watchlist_item(user_id, ticker, fit_score)
+    return item
+
+
+@app.get("/api/watchlist", tags=["Watchlist"])
+async def get_watchlist(current_user: dict = Depends(auth.get_current_user)):
+    """Get user's watchlist."""
+    user_id = current_user.get("user_id")
+    items = await database.db.get_watchlist(user_id)
+    return items
+
+
+# ─── 14. Price Alerts ───────────────────────────────────────────────────────
+
+@app.post("/api/price-alerts", tags=["Alerts"])
+async def create_price_alert(
+    ticker: str,
+    buy_target: Optional[float] = None,
+    sell_target: Optional[float] = None,
+    current_user: dict = Depends(auth.get_current_user),
+):
+    """Create a price alert for a stock."""
+    user_id = current_user.get("user_id")
+    alert = await database.db.add_price_alert(user_id, ticker, buy_target, sell_target)
+    return alert
+
+
+@app.get("/api/price-alerts", tags=["Alerts"])
+async def get_price_alerts(current_user: dict = Depends(auth.get_current_user)):
+    """Get user's active price alerts."""
+    user_id = current_user.get("user_id")
+    alerts = await database.db.get_price_alerts(user_id)
+    return alerts
+
+
+# ─── 15. Stock Prices (Real-time) ────────────────────────────────────────────
+
+@app.get("/api/prices/{ticker}", tags=["Prices"])
+async def get_stock_price(ticker: str):
+    """Get current price for a stock."""
+    price_data = prices.get_stock_price(ticker)
+    if not price_data:
+        raise HTTPException(status_code=404, detail=f"Could not fetch price for {ticker}")
+    return price_data
+
+
+@app.post("/api/prices/batch", tags=["Prices"])
+async def get_batch_prices(tickers: List[str]):
+    """Get prices for multiple stocks."""
+    return prices.get_stock_prices(tickers)

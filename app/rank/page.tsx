@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Share2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
@@ -15,12 +16,41 @@ import { cn } from "@/lib/utils/cn";
 
 const clamp = (n: number, lo: number) => Math.max(lo, n);
 
+// distance to the next round percentile milestone (10, 20, 30…), and roughly
+// how many weeks of the current extra-SIP pace it takes to cross it
+function nextRankMilestone(percentile: number, extraMonthly: number): { target: number; weeks: number } | null {
+  const nextTen = Math.floor((percentile - 1) / 10) * 10;
+  if (nextTen <= 0) return null;
+  const gap = percentile - nextTen;
+  const weeklyRate = 0.15 + extraMonthly / 5000; // faster with more monthly SIP
+  const weeks = Math.max(1, Math.round(gap / weeklyRate));
+  return { target: nextTen, weeks };
+}
+
 export default function RankPage() {
   const [extra, setExtra] = useState(500);
+  const [shared, setShared] = useState(false);
 
   // more monthly investment → better (lower) percentile. Clamped to a floor.
   const threeMonth = clamp(rank.wealthPercentile - Math.round(extra / 250), 8);
   const oneYear = clamp(rank.wealthPercentile - Math.round(extra / 110), 5);
+
+  const milestone = nextRankMilestone(rank.wealthPercentile, extra);
+
+  const share = async () => {
+    const text = `I'm in the top ${rank.wealthPercentile}% of investors my age on Ants 🐜`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text });
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+    } catch {
+      // user cancelled the share sheet — not an error
+    }
+  };
 
   return (
     <div className="px-5 pt-7">
@@ -33,8 +63,14 @@ export default function RankPage() {
       {/* ───── The rank ladder — the scoreboard, no gauge ───── */}
       <Reveal index={1}>
         <div className="relative mx-auto mt-8 flex h-[280px] flex-col justify-between">
-          {/* thin connector line threaded through the dots, centered */}
-          <span className="pointer-events-none absolute left-1/2 top-2 bottom-2 -translate-x-1/2 w-px bg-pressed" />
+          {/* connector line — warms to gold as it nears "you", dims below */}
+          <span
+            className="pointer-events-none absolute left-1/2 top-2 bottom-2 -translate-x-1/2 w-px"
+            style={{
+              background:
+                "linear-gradient(to bottom, transparent, rgba(232,160,32,0.35) 55%, rgba(232,160,32,0.6) 68%, rgba(255,255,255,0.05) 72%)",
+            }}
+          />
 
           {rank.strip.map((pos, i) => {
             const state =
@@ -89,8 +125,39 @@ export default function RankPage() {
         </div>
       </Reveal>
 
-      {/* ───── What moved you ───── */}
+      {/* milestone + share — the shareable stat gets a shareable moment */}
       <Reveal index={2}>
+        <Card className="mt-2">
+          {milestone && (
+            <>
+              <div className="flex items-baseline justify-between">
+                <p className="text-[13px] text-secondary">
+                  Top <span className="font-bold text-gold">{milestone.target}%</span> is close —
+                  ~{milestone.weeks} week{milestone.weeks === 1 ? "" : "s"} at this pace
+                </p>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-elevated">
+                <div
+                  className="h-full rounded-full fill-gold-gradient"
+                  style={{
+                    width: `${Math.min(100, ((100 - rank.wealthPercentile) / (100 - milestone.target)) * 100)}%`,
+                  }}
+                />
+              </div>
+            </>
+          )}
+          <button
+            onClick={share}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-elevated py-2.5 text-[13px] font-bold text-gold"
+          >
+            <Share2 size={14} strokeWidth={2.6} />
+            {shared ? "Copied — go paste it" : "Share your rank"}
+          </button>
+        </Card>
+      </Reveal>
+
+      {/* ───── What moved you ───── */}
+      <Reveal index={3}>
         <section className="mt-9">
           <h2 className="text-heading font-semibold text-primary">What moved you</h2>
           <div className="mt-4 space-y-3.5">
@@ -108,7 +175,7 @@ export default function RankPage() {
       </Reveal>
 
       {/* ───── Climb faster ───── */}
-      <Reveal index={3}>
+      <Reveal index={4}>
         <section className="mt-9">
           <h2 className="text-heading font-semibold text-primary">Climb faster</h2>
           <p className="mt-1.5 text-[14px] text-secondary">
@@ -137,14 +204,28 @@ export default function RankPage() {
             <div className="mt-6 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-pressed px-4 py-3.5">
                 <SectionLabel>3 months</SectionLabel>
-                <p className="mt-1.5 text-[20px] font-extrabold tabular text-primary">
-                  Top {threeMonth}%
+                <p className="mt-1.5 text-[20px] font-extrabold text-primary">
+                  Top{" "}
+                  <AnimatedNumber
+                    value={threeMonth}
+                    format={(n) => Math.round(n).toString()}
+                    duration={500}
+                    className="tabular"
+                  />
+                  %
                 </p>
               </div>
               <div className="rounded-xl bg-gold-dim px-4 py-3.5">
                 <SectionLabel className="text-gold/70">1 year</SectionLabel>
-                <p className="mt-1.5 text-[20px] font-extrabold tabular text-gold">
-                  Top {oneYear}%
+                <p className="mt-1.5 text-[20px] font-extrabold text-gold">
+                  Top{" "}
+                  <AnimatedNumber
+                    value={oneYear}
+                    format={(n) => Math.round(n).toString()}
+                    duration={500}
+                    className="tabular"
+                  />
+                  %
                 </p>
               </div>
             </div>

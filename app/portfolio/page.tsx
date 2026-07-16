@@ -91,6 +91,7 @@ export default function PortfolioPage() {
               holding={h}
               weight={analysis.holdings[i].weightPct / 100}
               intensity={maxAbsReturn > 0 ? Math.abs(h.returnPct) / maxAbsReturn : 0.3}
+              index={i}
             />
           ))}
         </div>

@@ -2,15 +2,17 @@
 
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Lock, Loader2, Upload, PenLine, ChevronRight } from "lucide-react";
+import { Lock, Loader2, Upload, PenLine, ChevronRight, AlertCircle } from "lucide-react";
 import { analyzeBroker, analyzePositions, analyzeScreenshot } from "@/lib/api/portfolio";
 import { ManualEntry, type ManualPosition } from "@/components/home/ManualEntry";
+import { useCountUp } from "@/lib/hooks/useCountUp";
 import type { Analysis } from "@/lib/analysis/types";
 
+// fake-but-plausible slivers behind the lock — the curiosity gap, not just a label
 const teasers = [
-  "Portfolio concentration check",
-  "SIP overlap and waste detection",
-  "Your real vs stated risk profile",
+  { label: "Portfolio concentration check", stat: "6█% in one stock" },
+  { label: "SIP overlap and waste detection", stat: "₹█,█00/yr overlapping" },
+  { label: "Your real vs stated risk profile", stat: "█x riskier than you think" },
 ];
 
 interface UploadEmptyStateProps {
@@ -20,7 +22,7 @@ interface UploadEmptyStateProps {
 
 /**
  * STATE 1 — onboarding. Three ways in, so account-linking is never a wall:
- *   1. Link your broker (Account Aggregator — real, most accurate)
+ *   1. Link your broker (Account Aggregator — real, most accurate) — PRIMARY
  *   2. Upload a screenshot (Claude-vision OCR — no account needed)
  *   3. Enter positions manually (full control, no account)
  * All three produce an Analysis via the backend and converge on processing →
@@ -31,6 +33,7 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const scanCount = useCountUp(12431, 1400);
 
   const handleBroker = async () => {
     try {
@@ -40,7 +43,7 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
       const analysis = await analyzeBroker();
       onStart(() => Promise.resolve(analysis));
     } catch {
-      setError("Couldn't reach the backend (uvicorn on :8000). Try a screenshot or manual entry.");
+      setError("We couldn't reach your broker right now — try a screenshot or manual entry instead.");
       setLinking(false);
     }
   };
@@ -96,23 +99,31 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
 
-          {/* PRIMARY — link broker (real, most accurate) */}
-          <button
+          {/* PRIMARY — link broker (real, most accurate). Solid gold, the hero action. */}
+          <motion.button
             type="button"
+            whileTap={{ scale: 0.98 }}
             onClick={handleBroker}
             disabled={linking}
-            className="mt-7 flex w-full animate-upload-breathe flex-col items-center gap-2 rounded-2xl border-[1.5px] border-dashed border-gold-soft bg-gold-faint px-6 py-7 text-center transition-opacity disabled:opacity-60"
+            className="mt-7 flex w-full animate-upload-breathe flex-col items-center gap-2 rounded-2xl fill-gold-gradient px-6 py-7 text-center shadow-cta transition-opacity disabled:opacity-70"
           >
             {linking ? (
-              <Loader2 size={30} className="animate-spin text-gold" />
+              <Loader2 size={30} className="animate-spin text-ink" />
             ) : (
-              <Lock size={30} strokeWidth={2.2} className="text-gold" />
+              <Lock size={30} strokeWidth={2.2} className="text-ink" />
             )}
-            <span className="mt-1 text-[15px] font-semibold text-primary">Link your broker</span>
-            <span className="text-[12px] text-muted">Account Aggregator · real-time &amp; most accurate</span>
-          </button>
+            <span className="mt-1 text-[15px] font-bold text-ink">Link your broker</span>
+            <span className="text-[12px] font-medium text-ink/70">
+              Account Aggregator · real-time &amp; most accurate
+            </span>
+          </motion.button>
 
-          {error && <p className="mt-2 text-center text-[12px] text-red">{error}</p>}
+          {error && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-dim px-3 py-2.5">
+              <AlertCircle size={16} className="shrink-0 text-red" />
+              <p className="text-[12px] leading-snug text-red">{error}</p>
+            </div>
+          )}
 
           {/* divider */}
           <div className="my-5 flex items-center gap-3">
@@ -123,50 +134,73 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
 
           {/* SECONDARY — no-account paths */}
           <div className="space-y-2.5">
-            <button
+            <motion.button
               type="button"
+              whileTap={{ scale: 0.97 }}
               onClick={() => fileRef.current?.click()}
-              className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left active:scale-[0.99]"
+              className="group flex w-full items-center gap-3 rounded-2xl border border-subtle bg-gradient-to-b from-white/[0.04] to-transparent bg-surface px-4 py-3.5 text-left transition-colors hover:border-strong hover:bg-elevated"
             >
               <Upload size={20} strokeWidth={2.2} className="shrink-0 text-gold" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-semibold text-primary">Upload a screenshot</span>
                 <span className="block text-[12px] text-muted">AI reads it · Groww · Zerodha · Kuvera</span>
               </span>
-              <ChevronRight size={18} className="shrink-0 text-muted" />
-            </button>
+              <ChevronRight
+                size={18}
+                className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+              />
+            </motion.button>
 
-            <button
+            <motion.button
               type="button"
+              whileTap={{ scale: 0.97 }}
               onClick={() => setView("manual")}
-              className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left active:scale-[0.99]"
+              className="group flex w-full items-center gap-3 rounded-2xl border border-subtle bg-gradient-to-b from-white/[0.04] to-transparent bg-surface px-4 py-3.5 text-left transition-colors hover:border-strong hover:bg-elevated"
             >
               <PenLine size={20} strokeWidth={2.2} className="shrink-0 text-gold" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-semibold text-primary">Enter positions manually</span>
                 <span className="block text-[12px] text-muted">Type in what you hold — no account needed</span>
               </span>
-              <ChevronRight size={18} className="shrink-0 text-muted" />
-            </button>
+              <ChevronRight
+                size={18}
+                className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+              />
+            </motion.button>
           </div>
 
           <p className="mt-5 text-center text-[11px] text-muted">
             🔒 Your data stays on your device. We don&apos;t store screenshots.
           </p>
 
-          {/* locked teasers — show the value before they commit */}
+          {/* social proof — momentum, not a dead line */}
+          <p className="mt-3 text-center text-[12px] text-secondary">
+            🐜 <span className="font-bold tabular text-primary">{Math.round(scanCount).toLocaleString("en-IN")}</span>{" "}
+            portfolios analyzed · avg 3 problems found
+          </p>
+
+          {/* locked teasers — a sliver of the prize behind each lock */}
           <div className="mt-7 space-y-2.5">
-            {teasers.map((label) => (
-              <div
-                key={label}
-                className="flex h-14 items-center justify-between rounded-2xl bg-surface px-4 opacity-50"
+            {teasers.map((t) => (
+              <motion.button
+                key={t.label}
+                type="button"
+                whileTap={{ x: [0, -3, 3, -2, 0] }}
+                transition={{ duration: 0.3 }}
+                onClick={() => fileRef.current?.click()}
+                className="flex h-14 w-full items-center justify-between rounded-2xl border border-subtle bg-surface px-4 text-left"
               >
-                <span className="text-[14px] font-medium text-secondary">{label}</span>
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <Lock size={14} className="text-gold" />
-                  Locked
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] font-medium text-secondary">{t.label}</span>
+                  <span className="block select-none truncate text-[11px] text-muted blur-[3px]">
+                    {t.stat}
+                  </span>
                 </span>
-              </div>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-gold">
+                  <Lock size={14} />
+                  Unlock
+                </span>
+              </motion.button>
             ))}
           </div>
         </motion.div>

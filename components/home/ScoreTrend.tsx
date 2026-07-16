@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { useEffect, useRef, useState } from "react";
+import { Area, AreaChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { Card } from "@/components/ui/Card";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { cn } from "@/lib/utils/cn";
@@ -30,32 +30,66 @@ function readHistory(): ScorePoint[] {
   }
 }
 
+// the next label-flipping threshold above the current score
+function nextMilestone(score: number): { value: number; label: string } | null {
+  const thresholds: [number, string][] = [
+    [40, "Needs work → Decent start"],
+    [60, "Decent start → Strong portfolio"],
+    [80, "Strong portfolio → Crushing it"],
+    [90, "one step from perfect"],
+  ];
+  for (const [value, label] of thresholds) {
+    if (score < value) return { value, label };
+  }
+  return null;
+}
+
 /**
  * The health score's pulse — a sparkline of every score the user has ever
- * seen, recorded locally. No card until there are at least two points:
- * a single number isn't a trend, it's a dot.
+ * seen, recorded locally, read synchronously so the card never pops in late.
+ * A dotted reference line marks the next milestone threshold — the sparkline
+ * shows where you've been AND where to go next.
  */
 export function ScoreTrend({ score }: { score: number }) {
-  const [history, setHistory] = useState<ScorePoint[]>([]);
-
-  useEffect(() => {
+  // lazy initializer: seed synchronously from localStorage + today's score so
+  // the card never renders null-then-pops-in on mount
+  const [history, setHistory] = useState<ScorePoint[]>(() => {
     const stored = readHistory();
     const last = stored[stored.length - 1];
-    if (!last || last.score !== score) {
-      stored.push({ t: Date.now(), score });
+    if (!last || last.score !== score) stored.push({ t: Date.now(), score });
+    return stored.slice(-MAX_ENTRIES);
+  });
+  const mounted = useRef(false);
+
+  // subsequent score changes (marking a fix done, etc.) append a new point
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      } catch {
+        // best-effort
+      }
+      return;
     }
-    const next = stored.slice(-MAX_ENTRIES);
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-    } catch {
-      // persistence is best-effort — the sparkline still renders this session
-    }
-    setHistory(next);
+    setHistory((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.score === score) return prev;
+      const next = [...prev, { t: Date.now(), score }].slice(-MAX_ENTRIES);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        // best-effort
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [score]);
 
   if (history.length < 2) return null;
 
   const delta = history[history.length - 1].score - history[0].score;
+  const milestone = nextMilestone(score);
 
   return (
     <Card>
@@ -75,14 +109,22 @@ export function ScoreTrend({ score }: { score: number }) {
         )}
       </div>
       <div className="mt-3">
-        <ResponsiveContainer width="100%" height={64}>
-          <AreaChart data={history} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+        <ResponsiveContainer width="100%" height={72}>
+          <AreaChart data={history} margin={{ top: 2, right: 4, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id="score-trend-gold" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--accent-gold)" stopOpacity={0.35} />
                 <stop offset="100%" stopColor="var(--accent-gold)" stopOpacity={0} />
               </linearGradient>
             </defs>
+            {milestone && (
+              <ReferenceLine
+                y={milestone.value}
+                stroke="var(--accent-gold)"
+                strokeDasharray="3 4"
+                strokeOpacity={0.5}
+              />
+            )}
             <Area
               type="monotone"
               dataKey="score"
@@ -90,19 +132,27 @@ export function ScoreTrend({ score }: { score: number }) {
               strokeWidth={2}
               fill="url(#score-trend-gold)"
               dot={false}
-              isAnimationActive={false}
+              activeDot={{ r: 4, fill: "var(--accent-gold)", stroke: "var(--bg-surface)", strokeWidth: 2 }}
+              isAnimationActive
+              animationDuration={700}
             />
             <YAxis
               hide
               domain={[
                 (min: number) => Math.max(0, min - 5),
-                (max: number) => Math.min(100, max + 5),
+                (max: number) => Math.min(100, Math.max(max, milestone?.value ?? 0) + 5),
               ]}
             />
             <XAxis hide dataKey="t" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      {milestone && (
+        <p className="mt-1 text-right text-[11px] text-muted">
+          <span className="font-semibold text-gold">{milestone.value}</span> — {milestone.label} ·{" "}
+          {milestone.value - score} pt{milestone.value - score === 1 ? "" : "s"} away
+        </p>
+      )}
     </Card>
   );
 }

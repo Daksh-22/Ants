@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AnimatePresence } from "framer-motion";
-import { ArrowRight, Check, RotateCcw } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, ArrowRight, Check, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
@@ -14,6 +14,11 @@ import { HealthRing } from "@/components/home/HealthRing";
 import { FixSheet } from "@/components/home/FixSheet";
 import { AskAnts } from "@/components/home/AskAnts";
 import { TipCheck } from "@/components/home/TipCheck";
+import { DailyCheckInPrompt } from "@/components/gamification/DailyCheckInPrompt";
+import { DailyMissions } from "@/components/gamification/DailyMissions";
+import { LevelProgress } from "@/components/gamification/LevelProgress";
+import { XP_REWARDS } from "@/lib/gamification/xpSystem";
+import { recordActivity } from "@/lib/gamification/dailyActivity";
 
 // recharts is heavy — load the sparkline lazily so first paint stays light
 const ScoreTrend = dynamic(
@@ -59,8 +64,13 @@ function InsightCard({
 }) {
   // a resolved problem turns from red/amber to teal — a visible reward
   const t: Tone = done ? "teal" : tone;
+  const pressable = !done && !!actionText && !!onAction;
   return (
-    <Card className={cn("border-l-[3px]", accent[t].border)}>
+    <Card
+      pressable={pressable}
+      onClick={pressable ? onAction : undefined}
+      className={cn("border-l-[3px]", accent[t].border, pressable && "cursor-pointer")}
+    >
       <div className="flex items-center gap-2">
         <span className={cn("h-1.5 w-1.5 rounded-full", accent[t].dot)} />
         <span className="text-label uppercase text-muted">{label}</span>
@@ -71,14 +81,11 @@ function InsightCard({
           <Check size={12} strokeWidth={3} />
           Sorted
         </span>
-      ) : actionText && onAction ? (
-        <button
-          onClick={onAction}
-          className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-gold"
-        >
+      ) : pressable ? (
+        <span className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-gold">
           {actionText}
           <ArrowRight size={13} strokeWidth={2.6} />
-        </button>
+        </span>
       ) : null}
     </Card>
   );
@@ -98,11 +105,21 @@ const sourceLabels: Record<string, string> = {
  * climbs the ring, flips the card teal, and drops the attention count.
  */
 export function Results() {
-  const { analysis: stored, doneFixes, markFixDone, reset } = useAppState();
+  const {
+    analysis: stored,
+    isDemo,
+    doneFixes,
+    markFixDone,
+    reset,
+    earnXp,
+    gamification,
+    unlockAchievement,
+  } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   const [openFixId, setOpenFixId] = useState<string | null>(null);
   const [pulse, setPulse] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const fixesById = useMemo(() => {
     const map = new Map<string, FixPlan>();
@@ -141,6 +158,22 @@ export function Results() {
     prevCount.current = doneCount;
   }, [doneCount]);
 
+  // milestone sweep — unlockAchievement is idempotent, so re-checking is free
+  const streak = gamification.dailyStreak.current;
+  useEffect(() => {
+    unlockAchievement("first_scan");
+    if (score >= 80) unlockAchievement("strong_portfolio");
+    if (analysis.holdings.length >= 10) unlockAchievement("diversifier");
+    if (new Set(analysis.holdings.map((h) => h.sector)).size >= 5)
+      unlockAchievement("diversified_investor");
+    if (doneFixes.length >= 5) unlockAchievement("problem_solver_5");
+    if (doneFixes.length >= 20) unlockAchievement("portfolio_surgeon_20");
+    if (streak >= 10) unlockAchievement("habit_former_10");
+    if (streak >= 50) unlockAchievement("discipline_master_50");
+    if (streak >= 100) unlockAchievement("century_club");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [score, doneFixes.length, analysis, streak]);
+
   const openFix = openFixId ? fixesById.get(openFixId) ?? null : null;
   const projected = openFix
     ? Math.min(100, score + (doneFixes.includes(openFix.id) ? 0 : openFix.scoreDelta))
@@ -149,6 +182,19 @@ export function Results() {
   return (
     <div>
       <Header />
+      <DailyCheckInPrompt />
+
+      {isDemo && (
+        <div className="mx-5 mt-4 flex items-center gap-2.5 rounded-xl bg-amber-dim px-3.5 py-2.5">
+          <AlertTriangle size={16} className="shrink-0 text-amber" />
+          <p className="min-w-0 flex-1 text-[12px] leading-snug text-amber">
+            Showing a demo portfolio — we couldn&apos;t reach your data.
+          </p>
+          <button onClick={reset} className="shrink-0 text-[12px] font-bold text-amber underline underline-offset-2">
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* portfolio strip — floats on the base, no container */}
       <Reveal className="px-5 pb-6 pt-7">
@@ -190,6 +236,26 @@ export function Results() {
               </p>
             </div>
           </Card>
+          {analysis.flags.length > 0 && (
+            <div className="mt-2.5 flex gap-1">
+              {analysis.flags.map((flag, i) => (
+                <motion.span
+                  key={flag.id}
+                  initial={false}
+                  animate={{
+                    backgroundColor: isDone(flag) ? "var(--accent-teal)" : "var(--accent-amber)",
+                    opacity: isDone(flag) ? 1 : [0.5, 0.85, 0.5],
+                  }}
+                  transition={
+                    isDone(flag)
+                      ? { duration: 0.4, delay: i * 0.05 }
+                      : { duration: 2.2, repeat: Infinity, ease: "easeInOut" }
+                  }
+                  className="h-1 flex-1 rounded-full"
+                />
+              ))}
+            </div>
+          )}
           {analysis.note && <p className="mt-2 text-[11px] text-muted">{analysis.note}</p>}
         </Reveal>
 
@@ -198,15 +264,23 @@ export function Results() {
           <ScoreTrend score={score} />
         </Reveal>
 
+        {/* level progress + today's missions */}
+        <Reveal index={3}>
+          <LevelProgress />
+        </Reveal>
+        <Reveal index={4}>
+          <DailyMissions />
+        </Reveal>
+
         {/* the truth */}
         {analysis.flags.length > 0 && (
           <section>
-            <Reveal index={2}>
+            <Reveal index={4}>
               <h2 className="mb-3 text-heading text-primary">Here&apos;s the truth</h2>
             </Reveal>
             <div className="space-y-3">
               {analysis.flags.map((flag, i) => (
-                <Reveal key={flag.id} index={3 + i}>
+                <Reveal key={flag.id} index={5 + i}>
                   <InsightCard
                     tone={flag.severity}
                     label={flag.label}
@@ -225,12 +299,12 @@ export function Results() {
         {/* what's working */}
         {analysis.working.length > 0 && (
           <section>
-            <Reveal index={6}>
+            <Reveal index={7}>
               <h2 className="mb-3 text-heading text-primary">What&apos;s working</h2>
             </Reveal>
             <div className="space-y-3">
               {analysis.working.map((w, i) => (
-                <Reveal key={w.id} index={7 + i}>
+                <Reveal key={w.id} index={8 + i}>
                   <InsightCard tone="teal" label={w.label}>
                     {w.body}
                   </InsightCard>
@@ -243,10 +317,10 @@ export function Results() {
         {/* your move */}
         {analysis.moves.length > 0 && (
           <section>
-            <Reveal index={9}>
+            <Reveal index={10}>
               <h2 className="mb-3 text-heading text-primary">Your move</h2>
             </Reveal>
-            <Reveal index={10}>
+            <Reveal index={11}>
               <div className="space-y-4">
                 {analysis.moves.map((move, i) => {
                   const d = doneFixes.includes(move.fixId);
@@ -294,13 +368,13 @@ export function Results() {
 
         {/* the pre-buy gut check — the tool you come back for */}
         {analysis.source !== "demo" && (
-          <Reveal index={11}>
+          <Reveal index={12}>
             <TipCheck analysis={analysis} />
           </Reveal>
         )}
 
         {/* the one community door — not a feed */}
-        <Reveal index={12}>
+        <Reveal index={13}>
           <Card className="border-l-[3px] border-purple">
             <p className="text-[14px] leading-[1.5] text-secondary">
               <span className="font-semibold text-primary">Tribes are coming</span> — compare notes
@@ -316,14 +390,18 @@ export function Results() {
           </Card>
         </Reveal>
 
-        {/* replay / analyze a fresh portfolio */}
-        <Reveal index={13}>
+        {/* replay / analyze a fresh portfolio — two-tap so progress is never lost by accident */}
+        <Reveal index={14}>
           <button
-            onClick={reset}
-            className="mx-auto flex items-center gap-1.5 pb-2 text-[12px] text-muted"
+            onClick={() => (confirmReset ? reset() : setConfirmReset(true))}
+            onBlur={() => setConfirmReset(false)}
+            className={cn(
+              "mx-auto flex items-center gap-1.5 pb-2 text-[12px]",
+              confirmReset ? "font-semibold text-amber" : "text-muted"
+            )}
           >
             <RotateCcw size={12} />
-            Scan a different portfolio
+            {confirmReset ? "Tap again to clear this breakdown" : "Scan a different portfolio"}
           </button>
         </Reveal>
       </div>
@@ -343,6 +421,8 @@ export function Results() {
             onClose={() => setOpenFixId(null)}
             onMarkDone={(id) => {
               markFixDone(id);
+              earnXp(XP_REWARDS.FIX_COMPLETED, "Fix completed");
+              recordActivity("fix");
               setOpenFixId(null);
             }}
           />

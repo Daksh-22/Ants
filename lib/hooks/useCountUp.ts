@@ -12,10 +12,12 @@ const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
  * formatPercent). Respects prefers-reduced-motion by jumping straight to target.
  * If `target` changes (e.g. a slider), it re-animates from the current value.
  */
-export function useCountUp(target: number, duration = 1200): number {
+export function useCountUp(target: number, duration = 1200, onComplete?: () => void): number {
   const [value, setValue] = useState(0);
   const valueRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   // keep a ref of the latest rendered value so re-animations start from "now"
   valueRef.current = value;
@@ -38,6 +40,7 @@ export function useCountUp(target: number, duration = 1200): number {
       const t = Math.min((now - start) / duration, 1);
       setValue(from + (target - from) * easeOutCubic(t));
       if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      else onCompleteRef.current?.();
     };
 
     rafRef.current = requestAnimationFrame(tick);

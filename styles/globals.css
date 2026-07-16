@@ -3,17 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --bg-base: #0c0c0e; /* warm near-black, not navy */
-  --bg-surface: #141417; /* cards */
-  --bg-elevated: #1c1c21; /* modals, popovers */
-  --bg-pressed: #222228; /* tap states */
+  --bg-base: #0a0a0c; /* warm near-black, not navy */
+  --bg-surface: #131316; /* cards */
+  --bg-elevated: #1b1b20; /* modals, popovers */
+  --bg-pressed: #232329; /* tap states */
 
   --accent-gold: #e8a020; /* PRIMARY — saffron gold. hero color. */
+  --accent-gold-bright: #ffc85c; /* gradient top-end */
+  --accent-gold-deep: #c8860a; /* gradient bottom-end */
   --accent-gold-dim: #e8a02026; /* gold at 15% for backgrounds */
-  --accent-teal: #00c896; /* gains, positive returns */
-  --accent-teal-dim: #00c89620;
-  --accent-red: #ff5757; /* losses */
-  --accent-red-dim: #ff575720;
+  --accent-teal: #00d69e; /* gains, positive returns */
+  --accent-teal-dim: #00d69e20;
+  --accent-red: #ff5c5c; /* losses */
+  --accent-red-dim: #ff5c5c20;
   --accent-purple: #8b5cf6; /* tribes, social layer */
   --accent-purple-dim: #8b5cf620;
   --accent-amber: #ffb020; /* caution — warnings that aren't losses. distinct from brand gold */
@@ -21,16 +23,26 @@
   --accent-gold-soft: #e8a02066; /* gold at 40% — dashed upload border */
   --accent-gold-faint: #e8a0200d; /* gold at 5% — upload zone fill */
 
-  --text-primary: #f0ede8; /* cream — warmer than pure white */
-  --text-secondary: #9ca3af;
-  --text-muted: #4b5563;
+  --text-primary: #f2efe9; /* cream — warmer than pure white */
+  --text-secondary: #a3a9b5;
+  --text-muted: #737a89; /* ≥3:1 on base — legible, still clearly tertiary */
 
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* the one gold gradient — every brand-moment fill uses this */
+  --gradient-gold: linear-gradient(135deg, #ffc85c 0%, #e8a020 55%, #d98b0f 100%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* keyboard users get a clear gold ring; mouse/touch users never see it */
+:focus-visible {
+  outline: 2px solid var(--accent-gold);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 html,
@@ -44,9 +56,22 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-body {
-  /* the phone frame lives centered on larger screens, full-bleed on mobile */
-  background: var(--bg-base);
+/* ambient light — the page breathes instead of sitting on dead black */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 80% 40% at 50% -8%, rgba(232, 160, 32, 0.07), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 110% 105%, rgba(139, 92, 246, 0.045), transparent 60%);
+}
+
+/* everything renders above the ambient layer */
+body > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* tabular figures everywhere numbers matter — set per-element via .tabular */
@@ -70,6 +95,100 @@ body {
   border-bottom: 1px dotted var(--text-muted);
   transform: translateY(-4px);
   opacity: 0.5;
+}
+
+/* ───────── surface treatments — the card language ───────── */
+
+/* every card: hairline border, faint top-light, soft drop. Depth without noise. */
+.card-sheen {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.006) 45%),
+    var(--bg-surface);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 10px 28px -14px rgba(0, 0, 0, 0.55);
+}
+.card-sheen-elevated {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.008) 45%),
+    var(--bg-elevated);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 16px 40px -16px rgba(0, 0, 0, 0.65);
+}
+
+/* frosted chrome — bottom dock, sticky headers, sheets */
+.glass {
+  background: rgba(16, 16, 20, 0.72);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* gold-washed hero fills (level bars, primary CTAs) */
+.fill-gold-gradient {
+  background: var(--gradient-gold);
+}
+
+/* hero numbers that should feel expensive */
+.text-gradient-gold {
+  background: linear-gradient(120deg, #ffd98a 0%, #e8a020 60%, #f0b23a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* skeleton shimmer for loading states */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.05) 45%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.05) 55%,
+    transparent
+  );
+  animation: shimmer-sweep 1.6s ease-in-out infinite;
+}
+@keyframes shimmer-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* a light sweep across progress bars — makes progress feel alive */
+.progress-shine {
+  position: relative;
+  overflow: hidden;
+}
+.progress-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%) skewX(-15deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: shine-sweep 2.8s ease-in-out infinite;
+}
+@keyframes shine-sweep {
+  0%,
+  55% {
+    transform: translateX(-100%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+  }
 }
 
 /* ───────── custom range slider — gold thumb, dark track, no native UI ───────── */
@@ -111,7 +230,7 @@ input[type="range"].ants-slider::-moz-range-thumb {
   background: linear-gradient(
     to top,
     var(--bg-base) 55%,
-    rgba(12, 12, 14, 0.85) 80%,
-    rgba(12, 12, 14, 0)
+    rgba(10, 10, 12, 0.85) 80%,
+    rgba(10, 10, 12, 0)
   );
 }

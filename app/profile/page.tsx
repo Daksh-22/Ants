@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { Flame, Users, Repeat, ShieldCheck, Bell, ChevronRight, type LucideIcon } from "lucide-react";
+import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import { Flame, Users, Repeat, ShieldCheck, Bell, ChevronRight, X, type LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -10,6 +11,9 @@ import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { useAppState } from "@/components/app/AppState";
+import { LevelProgress } from "@/components/gamification/LevelProgress";
+import { AchievementCard } from "@/components/gamification/AchievementCard";
+import { ACHIEVEMENT_DEFINITIONS, getProgressForAchievement } from "@/lib/gamification/achievements";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { user, sips, tribe } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
@@ -19,16 +23,24 @@ import { cn } from "@/lib/utils/cn";
 // longest running SIP = the investing streak (demo mode only)
 const streakMonths = Math.max(...sips.map((s) => s.months));
 
-const rows: { icon: LucideIcon; label: string; value: string }[] = [
-  { icon: Users, label: "Your tribes", value: "1 joined" },
-  { icon: Repeat, label: "SIPs", value: `${sips.length} active` },
-  { icon: ShieldCheck, label: "Risk profile", value: user.riskProfile },
-  { icon: Bell, label: "Notifications", value: "On" },
+const STREAK_MILESTONES = [7, 30, 90, 180, 365];
+function nextStreakMilestone(days: number): number {
+  return STREAK_MILESTONES.find((m) => m > days) ?? STREAK_MILESTONES[STREAK_MILESTONES.length - 1];
+}
+
+type RowKey = "tribes" | "sips" | "risk" | "notifications";
+
+const rows: { key: RowKey; icon: LucideIcon; label: string; value: string }[] = [
+  { key: "tribes", icon: Users, label: "Your tribes", value: "1 joined" },
+  { key: "sips", icon: Repeat, label: "SIPs", value: `${sips.length} active` },
+  { key: "risk", icon: ShieldCheck, label: "Risk profile", value: user.riskProfile },
+  { key: "notifications", icon: Bell, label: "Notifications", value: "On" },
 ];
 
 export default function ProfilePage() {
-  const { analysis: stored, doneFixes } = useAppState();
+  const { analysis: stored, doneFixes, gamification } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
+  const [openSheet, setOpenSheet] = useState<RowKey | null>(null);
 
   // live score — same math as Results: base score + deltas from fixes marked done
   const doneDelta = analysis.flags
@@ -49,6 +61,8 @@ export default function ProfilePage() {
   }, []);
 
   const isDemo = analysis.source === "demo";
+  const streak = gamification.dailyStreak.current;
+  const milestone = nextStreakMilestone(streak);
 
   const stats = [
     { label: "Net worth", value: formatINR(analysis.summary.totalValue), className: "text-primary" },
@@ -116,6 +130,24 @@ export default function ProfilePage() {
             </p>
           </Card>
         )}
+
+        {streak > 0 && (
+          <div className="mt-3 rounded-2xl bg-surface p-4">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[12px] text-secondary">
+                <span className="font-bold text-gold">{streak}</span> day check-in streak · longest{" "}
+                {gamification.dailyStreak.longest}
+              </p>
+              <p className="text-[11px] text-muted">{milestone} days</p>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-elevated">
+              <div
+                className="h-full rounded-full fill-gold-gradient"
+                style={{ width: `${Math.min(100, (streak / milestone) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
       </Reveal>
 
       {/* quick stats */}
@@ -130,18 +162,78 @@ export default function ProfilePage() {
         </div>
       </Reveal>
 
-      {/* settings-style rows */}
+      {/* progression — level, XP, badges */}
       <Reveal index={3} className="mt-6">
+        <SectionLabel className="mb-2">Progression</SectionLabel>
+        <LevelProgress />
+      </Reveal>
+
+      <Reveal index={4} className="mt-4">
+        {(() => {
+          const unlocked = gamification.achievements;
+          const unlockedIds = new Set(unlocked.map((a) => a.id));
+          // nearest locked badges, with live progress where it exists
+          const locked = Object.values(ACHIEVEMENT_DEFINITIONS)
+            .filter((d) => !unlockedIds.has(d.id))
+            .slice(0, 3);
+          return (
+            <div className="space-y-2">
+              {unlocked.map((a, i) => (
+                <AchievementCard key={a.id} achievement={a} index={i} />
+              ))}
+              {locked.map((d, i) => (
+                <AchievementCard
+                  key={d.id}
+                  achievement={d}
+                  index={unlocked.length + i}
+                  isLocked
+                  progress={(() => {
+                    const p = getProgressForAchievement(
+                      d.id,
+                      gamification.dailyStreak.current,
+                      doneFixes.length
+                    );
+                    return { current: p.progress, max: p.maxProgress };
+                  })()}
+                />
+              ))}
+              {unlocked.length === 0 && (
+                <p className="text-center text-[12px] text-muted">
+                  Badges land as you show up. The first one&apos;s already loading.
+                </p>
+              )}
+            </div>
+          );
+        })()}
+      </Reveal>
+
+      {/* settings-style rows */}
+      <Reveal index={5} className="mt-6">
         <SectionLabel className="mb-2">Account</SectionLabel>
         <div className="space-y-2">
           {rows.map((row) => {
             const Icon = row.icon;
+            if (row.key === "tribes") {
+              return (
+                <Link
+                  key={row.key}
+                  href="/tribes"
+                  className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left transition-colors hover:bg-elevated"
+                >
+                  <Icon size={18} strokeWidth={2.2} className="text-gold" />
+                  <span className="text-[15px] font-medium text-primary">{row.label}</span>
+                  <span className="ml-auto text-[13px] text-secondary">{row.value}</span>
+                  <ChevronRight size={16} className="text-muted" />
+                </Link>
+              );
+            }
             return (
               <motion.button
-                key={row.label}
+                key={row.key}
                 type="button"
                 whileTap={{ scale: 0.98 }}
-                className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left"
+                onClick={() => setOpenSheet(row.key)}
+                className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left transition-colors hover:bg-elevated"
               >
                 <Icon size={18} strokeWidth={2.2} className="text-gold" />
                 <span className="text-[15px] font-medium text-primary">{row.label}</span>
@@ -153,11 +245,96 @@ export default function ProfilePage() {
         </div>
       </Reveal>
 
-      <Reveal index={4} className="mt-6">
+      <Reveal index={6} className="mt-6">
         <p className="text-center text-[12px] text-muted">
           Member of {tribe.name} · {tribe.membershipMonths} months in
         </p>
       </Reveal>
+
+      <AccountSheet
+        openKey={openSheet}
+        onClose={() => setOpenSheet(null)}
+        sips={sips}
+        riskProfile={user.riskProfile}
+      />
     </div>
+  );
+}
+
+function AccountSheet({
+  openKey,
+  onClose,
+  sips: sipList,
+  riskProfile,
+}: {
+  openKey: RowKey | null;
+  onClose: () => void;
+  sips: typeof sips;
+  riskProfile: string;
+}) {
+  const titles: Record<RowKey, string> = {
+    tribes: "Your tribes",
+    sips: "Your SIPs",
+    risk: "Risk profile",
+    notifications: "Notifications",
+  };
+
+  return (
+    <AnimatePresence>
+      {openKey && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 z-[60] bg-black/60"
+          />
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", stiffness: 320, damping: 34 }}
+            className="fixed inset-x-0 bottom-0 z-[60] mx-auto w-full max-w-app rounded-t-3xl bg-elevated px-6 pb-8 pt-3"
+          >
+            <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-strong" />
+            <div className="flex items-start justify-between">
+              <h3 className="text-[18px] font-bold text-primary">{titles[openKey]}</h3>
+              <button onClick={onClose} className="-m-1 p-1 text-muted">
+                <X size={20} strokeWidth={2.4} />
+              </button>
+            </div>
+
+            {openKey === "sips" && (
+              <div className="mt-4 space-y-3">
+                {sipList.map((sip) => (
+                  <div key={sip.name} className="rounded-xl bg-surface p-3.5">
+                    <p className="text-[14px] font-semibold text-primary">{sip.name}</p>
+                    <p className="mt-0.5 text-[12px] text-muted">
+                      {formatINR(sip.monthly)}/mo · {sip.months} months · {formatPercent(sip.returnPct)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {openKey === "risk" && (
+              <p className="mt-4 text-[14px] leading-relaxed text-secondary">
+                You&apos;re marked <span className="font-semibold text-gold">{riskProfile}</span>. This
+                shapes which fixes and tips Ants surfaces — aggressive profiles see more upside language,
+                conservative ones see more downside framing.
+              </p>
+            )}
+
+            {openKey === "notifications" && (
+              <p className="mt-4 text-[14px] leading-relaxed text-secondary">
+                Daily check-in reminders and price alert triggers are on. Fine-grained controls are
+                coming — for now it&apos;s all or nothing.
+              </p>
+            )}
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
   );
 }
