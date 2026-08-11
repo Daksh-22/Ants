@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Home, PieChart, BarChart3, Users, TrendingUp, User, type LucideIcon } from "lucide-react";
+import { Home, PieChart, BarChart3, User, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useAppState } from "@/components/app/AppState";
 
@@ -13,12 +13,14 @@ interface Tab {
   icon: LucideIcon;
 }
 
+// Tribes and Rank are not shipped — both pages were fabricated end to end and
+// now render honest placeholders. Their routes still resolve (so existing links
+// don't 404), but they're out of the dock until there's a real social graph
+// behind them.
 const tabs: Tab[] = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/portfolio", label: "Portfolio", icon: PieChart },
   { href: "/insights", label: "Insights", icon: BarChart3 },
-  { href: "/tribes", label: "Tribes", icon: Users },
-  { href: "/rank", label: "Rank", icon: TrendingUp },
   { href: "/profile", label: "Profile", icon: User },
 ];
 

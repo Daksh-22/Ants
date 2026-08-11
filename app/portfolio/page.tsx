@@ -11,6 +11,7 @@ import { HoldingRow } from "@/components/ui/HoldingRow";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { useAppState } from "@/components/app/AppState";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { sips, type ComputedHolding } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
@@ -48,6 +49,10 @@ export default function PortfolioPage() {
 
   return (
     <div className="px-5 pt-7">
+      {/* The hero P&L below renders the sample portfolio when the user has no
+          analysis of their own. Say so — it read as their money before. */}
+      {analysis.source === "demo" && <DemoBanner className="mb-4" />}
+
       {/* ───── Page title ───── */}
       <Reveal>
         <h1 className="text-[22px] font-bold text-primary">Your portfolio</h1>

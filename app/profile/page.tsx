@@ -15,6 +15,7 @@ import { LevelProgress } from "@/components/gamification/LevelProgress";
 import { AchievementCard } from "@/components/gamification/AchievementCard";
 import { ACHIEVEMENT_DEFINITIONS, getProgressForAchievement } from "@/lib/gamification/achievements";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { user, sips, tribe } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
@@ -76,20 +77,22 @@ export default function ProfilePage() {
 
   return (
     <div className="px-5 pt-7">
+      {isDemo && <DemoBanner className="mb-4" />}
+
       {/* identity */}
       <Reveal>
+        {/* There is no signed-in user — accounts aren't enabled. This block
+            used to render "Arjun Mehta · @arjun_compounds · 24 · Bengaluru ·
+            Zerodha" plus an "Aggressive investor" badge as the viewer's own
+            identity and risk profile, for everyone, computed from nothing. */}
         <div className="flex items-center gap-4">
-          <Avatar initials={user.initials} color="gold" size={60} />
+          <Avatar initials="🐜" color="gold" size={60} />
           <div className="min-w-0">
-            <h1 className="text-[22px] font-bold leading-tight text-primary">{user.name}</h1>
-            <p className="text-[13px] font-semibold text-gold">{user.handle}</p>
+            <h1 className="text-[22px] font-bold leading-tight text-primary">Your portfolio</h1>
             <p className="mt-0.5 text-[12px] text-muted">
-              {user.age} · {user.city} · {user.broker}
+              Stored on this device · no account needed
             </p>
           </div>
-        </div>
-        <div className="mt-3">
-          <Badge tone="gold">Aggressive investor</Badge>
         </div>
       </Reveal>
 
@@ -207,56 +210,13 @@ export default function ProfilePage() {
         })()}
       </Reveal>
 
-      {/* settings-style rows */}
-      <Reveal index={5} className="mt-6">
-        <SectionLabel className="mb-2">Account</SectionLabel>
-        <div className="space-y-2">
-          {rows.map((row) => {
-            const Icon = row.icon;
-            if (row.key === "tribes") {
-              return (
-                <Link
-                  key={row.key}
-                  href="/tribes"
-                  className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left transition-colors hover:bg-elevated"
-                >
-                  <Icon size={18} strokeWidth={2.2} className="text-gold" />
-                  <span className="text-[15px] font-medium text-primary">{row.label}</span>
-                  <span className="ml-auto text-[13px] text-secondary">{row.value}</span>
-                  <ChevronRight size={16} className="text-muted" />
-                </Link>
-              );
-            }
-            return (
-              <motion.button
-                key={row.key}
-                type="button"
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setOpenSheet(row.key)}
-                className="flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left transition-colors hover:bg-elevated"
-              >
-                <Icon size={18} strokeWidth={2.2} className="text-gold" />
-                <span className="text-[15px] font-medium text-primary">{row.label}</span>
-                <span className="ml-auto text-[13px] text-secondary">{row.value}</span>
-                <ChevronRight size={16} className="text-muted" />
-              </motion.button>
-            );
-          })}
-        </div>
-      </Reveal>
+      {/* An "Account" section used to sit here with four rows — "Your tribes:
+          1 joined", "SIPs: 3 active", "Risk profile: Aggressive",
+          "Notifications: On". None of them reflected any real state, nothing
+          read them back, and there are no accounts on this deployment. Tapping
+          them opened sheets listing specific mutual funds and monthly amounts
+          the user had never entered. Removed rather than mocked. */}
 
-      <Reveal index={6} className="mt-6">
-        <p className="text-center text-[12px] text-muted">
-          Member of {tribe.name} · {tribe.membershipMonths} months in
-        </p>
-      </Reveal>
-
-      <AccountSheet
-        openKey={openSheet}
-        onClose={() => setOpenSheet(null)}
-        sips={sips}
-        riskProfile={user.riskProfile}
-      />
     </div>
   );
 }

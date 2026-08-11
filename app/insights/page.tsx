@@ -19,6 +19,7 @@ import type {
 import { computeSectorMetrics } from "@/lib/insights/sectorMetrics";
 import { fetchBenchmarks, type BenchmarksReply } from "@/lib/api/portfolio";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { XP_REWARDS } from "@/lib/gamification/xpSystem";
 import { formatPercent } from "@/lib/utils/formatPercent";
 import { formatINR } from "@/lib/utils/formatINR";
@@ -160,6 +161,12 @@ export default function InsightsPage() {
   return (
     <div>
       <Header />
+
+      {analysis.source === "demo" && (
+        <div className="px-5 pt-5">
+          <DemoBanner />
+        </div>
+      )}
 
       {/* hero — how you're doing vs the market. Renders your own return until
           the live index lands; never invents an index number to compare to. */}

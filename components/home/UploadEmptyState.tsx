@@ -115,7 +115,7 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
           </h1>
 
           <p className="mx-auto mt-3 max-w-[320px] text-center text-[15px] leading-[1.6] text-secondary">
-            Connect your broker, upload a screenshot, or just type it in. We&apos;ll tell you the
+            Upload a screenshot or just type it in. We&apos;ll tell you the
             truth — not what you want to hear.
           </p>
 
