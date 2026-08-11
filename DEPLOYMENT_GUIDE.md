@@ -1,7 +1,7 @@
 # Ants Deployment Guide
 
 ## Prerequisites
-- Anthropic API Key: `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`
+- Anthropic API Key: `sk-ant-api03-YOUR_API_KEY_HERE`
 - Vercel account (for frontend)
 - Render account (for backend)
 
@@ -26,7 +26,7 @@ After creating the service, go to **Settings** → **Environment**
 
 Add these variables:
 ```
-ANTHROPIC_API_KEY = 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
+ANTHROPIC_API_KEY = sk-ant-api03-YOUR_API_KEY_HERE
 ANTHROPIC_MODEL = claude-opus-4-8
 ENVIRONMENT = production
 JWT_SECRET = prod-secret-key-change-this-later
@@ -152,7 +152,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Set the API key (MacOS/Linux)
-export ANTHROPIC_API_KEY="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"
+export ANTHROPIC_API_KEY="sk-ant-api03-YOUR_API_KEY_HERE"
 
 uvicorn main:app --reload --port 8000
 ```

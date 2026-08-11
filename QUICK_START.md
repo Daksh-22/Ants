@@ -28,7 +28,7 @@ After creating service:
 - Add these 5 variables:
 
 ```
-ANTHROPIC_API_KEY = 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
+ANTHROPIC_API_KEY = sk-ant-api03-YOUR_API_KEY_HERE
 ANTHROPIC_MODEL = claude-opus-4-8
 ENVIRONMENT = production
 JWT_SECRET = prod-secret
