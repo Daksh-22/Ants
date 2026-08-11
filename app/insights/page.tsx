@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -17,6 +17,7 @@ import type {
   HoldingVolatility,
 } from "@/lib/insights/types";
 import { computeSectorMetrics } from "@/lib/insights/sectorMetrics";
+import { fetchBenchmarks, type BenchmarksReply } from "@/lib/api/portfolio";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { XP_REWARDS } from "@/lib/gamification/xpSystem";
 import { formatPercent } from "@/lib/utils/formatPercent";
@@ -25,8 +26,11 @@ import { cn } from "@/lib/utils/cn";
 
 const INSIGHTS_VISIT_KEY = "ants:insights-last-visit";
 
-// Static benchmark returns for MVP — swap for a live index API later.
-const BENCHMARKS = { nifty50: 8.5, sensex: 7.2, microCap: 12.3 };
+// Index returns come from GET /api/benchmarks (live, Yahoo-sourced, cached 1h).
+// They were hardcoded here as { nifty50: 8.5, sensex: 7.2, microCap: 12.3 } —
+// wrong by enough to invert the conclusion, since the Nifty's actual trailing
+// year was negative. When the fetch fails we hide the comparison rather than
+// fall back to a number we made up.
 
 function InsightsSkeleton() {
   return (
@@ -92,21 +96,46 @@ export default function InsightsPage() {
     return { riskMetrics: metrics, holdingVolatilities: vols };
   }, [analysis]);
 
-  const benchmarks: BenchmarkComparisonType = useMemo(
-    () => ({
-      user_return_pct: analysis.summary.returnsPct,
-      nifty50_return_pct: BENCHMARKS.nifty50,
-      sensex_return_pct: BENCHMARKS.sensex,
-      nifty_micro_cap_return_pct: BENCHMARKS.microCap,
+  const [indexes, setIndexes] = useState<BenchmarksReply["indexes"] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchBenchmarks()
+      .then((r) => {
+        if (alive && r.available) setIndexes(r.indexes);
+      })
+      .catch(() => {
+        /* leave null — the comparison stays hidden rather than showing a guess */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const nifty = indexes?.nifty50?.returnPct ?? null;
+
+  const benchmarks: BenchmarkComparisonType | null = useMemo(() => {
+    if (!indexes) return null;
+    const n = indexes.nifty50?.returnPct;
+    const s = indexes.sensex?.returnPct;
+    const m = indexes.midCap?.returnPct;
+    if (n === undefined || s === undefined || m === undefined) return null;
+    const mine = analysis.summary.returnsPct;
+    return {
+      user_return_pct: mine,
+      nifty50_return_pct: n,
+      sensex_return_pct: s,
+      nifty_micro_cap_return_pct: m,
       outperformance: {
-        vs_nifty50: analysis.summary.returnsPct - BENCHMARKS.nifty50,
-        vs_sensex: analysis.summary.returnsPct - BENCHMARKS.sensex,
-        vs_nifty_micro_cap: analysis.summary.returnsPct - BENCHMARKS.microCap,
+        vs_nifty50: mine - n,
+        vs_sensex: mine - s,
+        vs_nifty_micro_cap: mine - m,
       },
-      rank_percentile: 72,
-    }),
-    [analysis]
-  );
+      // No percentile: ranking a user against peers needs a real cohort of
+      // real users. This was pinned at 72 and rendered as a "Top 28%" trophy
+      // for everyone.
+      rank_percentile: null,
+    };
+  }, [analysis, indexes]);
 
   // first insights visit each day earns XP — same one-shot pattern as check-in
   useEffect(() => {
@@ -125,32 +154,47 @@ export default function InsightsPage() {
 
   if (!hydrated) return <InsightsSkeleton />;
 
-  const vsNifty = benchmarks.outperformance.vs_nifty50;
+  // null until the live index fetch lands (or forever, if it fails)
+  const vsNifty = benchmarks?.outperformance.vs_nifty50 ?? null;
 
   return (
     <div>
       <Header />
 
-      {/* hero — the one number: how you're doing vs the market */}
+      {/* hero — how you're doing vs the market. Renders your own return until
+          the live index lands; never invents an index number to compare to. */}
       <Reveal className="relative px-5 pb-6 pt-7">
         <div
           className={cn(
             "pointer-events-none absolute left-5 top-2 h-32 w-32 rounded-full blur-3xl",
-            vsNifty >= 0 ? "bg-teal/15" : "bg-red/15"
+            (vsNifty ?? analysis.summary.returnsPct) >= 0 ? "bg-teal/15" : "bg-red/15"
           )}
         />
-        <p className="relative text-label uppercase text-muted">You vs Nifty 50</p>
+        <p className="relative text-label uppercase text-muted">
+          {vsNifty === null ? "Your return" : "You vs Nifty 50"}
+        </p>
         <AnimatedNumber
-          value={vsNifty}
+          value={vsNifty ?? analysis.summary.returnsPct}
           format={(n) => formatPercent(n)}
           className={cn(
             "relative mt-1 block text-display font-extrabold",
-            vsNifty >= 0 ? "text-teal" : "text-red"
+            (vsNifty ?? analysis.summary.returnsPct) >= 0 ? "text-teal" : "text-red"
           )}
         />
         <p className="relative mt-1 text-[13px] text-muted">
-          Your {formatPercent(analysis.summary.returnsPct)} on {formatINR(analysis.summary.invested)}{" "}
-          invested, against the index&apos;s {formatPercent(BENCHMARKS.nifty50)}
+          {vsNifty === null || nifty === null ? (
+            <>
+              {formatPercent(analysis.summary.returnsPct)} on{" "}
+              {formatINR(analysis.summary.invested)} invested. Index comparison
+              unavailable right now.
+            </>
+          ) : (
+            <>
+              Your {formatPercent(analysis.summary.returnsPct)} on{" "}
+              {formatINR(analysis.summary.invested)} invested, against the
+              index&apos;s {formatPercent(nifty)}
+            </>
+          )}
         </p>
       </Reveal>
 
@@ -182,7 +226,7 @@ export default function InsightsPage() {
           <Reveal index={5}>
             <h2 className="mb-3 text-heading text-primary">How you compare</h2>
           </Reveal>
-          <BenchmarkComparison benchmarks={benchmarks} index={6} />
+          {benchmarks && <BenchmarkComparison benchmarks={benchmarks} index={6} />}
         </section>
 
         {/* watchlist — research before the money moves */}

@@ -59,23 +59,26 @@ export function BenchmarkComparison({ benchmarks, index = 0 }: BenchmarkComparis
         {beatsAll && <SheenSweep />}
         <div className="mb-4 flex items-baseline justify-between">
           <p className="text-[15px] font-semibold text-primary">Same money, four homes</p>
-          <motion.span
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 300, damping: 22, delay: 0.3 }}
-            className={cn(
-              "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold",
-              beatsAll ? "fill-gold-gradient text-ink shadow-cta" : "bg-gold-dim text-gold"
-            )}
-          >
-            {beatsAll && <Trophy size={11} strokeWidth={2.8} />}
-            Top{" "}
-            <AnimatedNumber
-              value={100 - benchmarks.rank_percentile}
-              format={(n) => `${Math.round(n)}%`}
-              className="tabular"
-            />
-          </motion.span>
+          {/* Only claim a peer ranking when one was actually computed. */}
+          {benchmarks.rank_percentile !== null && (
+            <motion.span
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 300, damping: 22, delay: 0.3 }}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold",
+                beatsAll ? "fill-gold-gradient text-ink shadow-cta" : "bg-gold-dim text-gold"
+              )}
+            >
+              {beatsAll && <Trophy size={11} strokeWidth={2.8} />}
+              Top{" "}
+              <AnimatedNumber
+                value={100 - benchmarks.rank_percentile}
+                format={(n) => `${Math.round(n)}%`}
+                className="tabular"
+              />
+            </motion.span>
+          )}
         </div>
 
         {/* bars on a shared, zero-centered axis */}

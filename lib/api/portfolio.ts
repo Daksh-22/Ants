@@ -80,6 +80,31 @@ export async function analyzeBroker(): Promise<Analysis> {
   return ready.analysis;
 }
 
+// ─── Index benchmarks (live) ────────────────────────────────────────────────
+
+export interface IndexBenchmark {
+  label: string;
+  symbol: string;
+  returnPct: number;
+  /** trading date the close was taken from */
+  asOf: string;
+}
+
+export interface BenchmarksReply {
+  available: boolean;
+  indexes: Partial<Record<"nifty50" | "sensex" | "midCap", IndexBenchmark>>;
+  note?: string | null;
+}
+
+/**
+ * Trailing 1-year index returns. Callers MUST handle available:false by
+ * hiding the comparison — never by substituting a placeholder. These numbers
+ * were hardcoded before, and the Nifty figure had the wrong sign.
+ */
+export function fetchBenchmarks(): Promise<BenchmarksReply> {
+  return request<BenchmarksReply>("/api/benchmarks");
+}
+
 // ─── Ask Ants (AI + RAG) ─────────────────────────────────────────────────────
 
 export interface ChatSource {

@@ -28,7 +28,13 @@ export interface BenchmarkComparison {
     vs_sensex: number;
     vs_nifty_micro_cap: number;
   };
-  rank_percentile: number; // 0-100, where 100 = top performer among all users
+  /**
+   * Percentile against other Ants users, or null when we can't compute one.
+   * Null is the normal case today: ranking a user against peers needs a real
+   * cohort of real users. This was previously pinned at 72, which rendered a
+   * gold "Top 28%" trophy for every single user.
+   */
+  rank_percentile: number | null;
 }
 
 export interface SectorMetrics {

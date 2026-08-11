@@ -4,13 +4,11 @@ import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Lock, Loader2, Upload, PenLine, ChevronRight, AlertCircle } from "lucide-react";
 import {
-  analyzeBroker,
   analyzePositions,
   extractHoldingsFromScreenshot,
   type RawPosition,
 } from "@/lib/api/portfolio";
 import { ManualEntry, type ManualPosition } from "@/components/home/ManualEntry";
-import { useCountUp } from "@/lib/hooks/useCountUp";
 import type { Analysis } from "@/lib/analysis/types";
 
 // fake-but-plausible slivers behind the lock — the curiosity gap, not just a label
@@ -38,26 +36,11 @@ interface UploadEmptyStateProps {
  */
 export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
   const [view, setView] = useState<"choose" | "manual" | "review">("choose");
-  const [linking, setLinking] = useState(false);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [extracted, setExtracted] = useState<RawPosition[]>([]);
   const [reviewNote, setReviewNote] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const scanCount = useCountUp(12431, 1400);
-
-  const handleBroker = async () => {
-    try {
-      setLinking(true);
-      setError(null);
-      // run the consent flow up-front so a dead backend shows a real error
-      const analysis = await analyzeBroker();
-      onStart(() => Promise.resolve(analysis));
-    } catch {
-      setError("We couldn't reach your broker right now — try a screenshot or manual entry instead.");
-      setLinking(false);
-    }
-  };
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
@@ -145,24 +128,21 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
             onChange={(e) => void handleFile(e.target.files?.[0])}
           />
 
-          {/* PRIMARY — link broker (real, most accurate). Solid gold, the hero action. */}
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            onClick={handleBroker}
-            disabled={linking}
-            className="mt-7 flex w-full animate-upload-breathe flex-col items-center gap-2 rounded-2xl fill-gold-gradient px-6 py-7 text-center shadow-cta transition-opacity disabled:opacity-70"
-          >
-            {linking ? (
-              <Loader2 size={30} className="animate-spin text-ink" />
-            ) : (
-              <Lock size={30} strokeWidth={2.2} className="text-ink" />
-            )}
-            <span className="mt-1 text-[15px] font-bold text-ink">Link your broker</span>
-            <span className="text-[12px] font-medium text-ink/70">
-              Account Aggregator · real-time &amp; most accurate
-            </span>
-          </motion.button>
+          {/* Broker linking is NOT built. It used to be the gold hero button and
+              returned the built-in demo portfolio to everyone, presented as their
+              own holdings — the single most misleading thing in the product.
+              Shown as an honest, non-interactive "not yet" so the two paths that
+              actually work get the attention. */}
+          <div className="mt-7 flex w-full items-center gap-3 rounded-2xl border border-dashed border-white/12 px-5 py-4">
+            <Lock size={18} strokeWidth={2.2} className="shrink-0 text-muted" />
+            <div className="min-w-0">
+              <p className="text-[13px] font-bold text-secondary">Link your broker</p>
+              <p className="text-[11px] leading-snug text-muted">
+                Not available yet — it needs a licensed Account Aggregator. Use a
+                screenshot or manual entry below.
+              </p>
+            </div>
+          </div>
 
           {error && (
             <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-dim px-3 py-2.5">
@@ -230,11 +210,9 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
             🔒 Your data stays on your device. We don&apos;t store screenshots.
           </p>
 
-          {/* social proof — momentum, not a dead line */}
-          <p className="mt-3 text-center text-[12px] text-secondary">
-            🐜 <span className="font-bold tabular text-primary">{Math.round(scanCount).toLocaleString("en-IN")}</span>{" "}
-            portfolios analyzed · avg 3 problems found
-          </p>
+          {/* A "12,431 portfolios analyzed" counter used to animate here, styled
+              as a live ticker. Both that number and the "avg 3 problems" figure
+              were invented. Nothing replaces it until the count is real. */}
 
           {/* locked teasers — a sliver of the prize behind each lock */}
           <div className="mt-7 space-y-2.5">
