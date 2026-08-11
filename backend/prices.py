@@ -24,18 +24,21 @@ class PriceCache:
     def load_cache(self):
         """Load price cache from disk."""
         if os.path.exists(CACHE_FILE):
+            # Corrupt or unreadable cache is recoverable — start empty. Bare
+            # `except` also caught KeyboardInterrupt/SystemExit, which made the
+            # process unkillable mid-load.
             try:
                 with open(CACHE_FILE, "r") as f:
                     self.memory_cache = json.load(f)
-            except:
+            except (OSError, ValueError):
                 self.memory_cache = {}
 
     def save_cache(self):
-        """Save price cache to disk."""
+        """Save price cache to disk. A failed write is not worth failing a request."""
         try:
             with open(CACHE_FILE, "w") as f:
                 json.dump(self.memory_cache, f)
-        except:
+        except (OSError, TypeError, ValueError):
             pass
 
     def get(self, ticker: str) -> Optional[Dict]:

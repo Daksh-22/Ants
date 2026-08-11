@@ -182,6 +182,19 @@ async def ocr_screenshot(file: UploadFile = File(...)):
             "note": "Couldn't read the screenshot (AI OCR unavailable) — showing the demo analysis."}
 
 
+def _sniff_image(raw: bytes) -> Optional[str]:
+    """Real media type from magic bytes, or None if it isn't an image we accept."""
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    return None
+
+
 @app.post("/api/ocr/extract", tags=["Analysis"])
 async def ocr_extract(file: UploadFile = File(...)):
     """Screenshot → best-effort extracted holdings for the user to REVIEW,
@@ -195,24 +208,32 @@ async def ocr_extract(file: UploadFile = File(...)):
     if len(raw) > 8_000_000:
         raise HTTPException(status_code=413, detail="Image over 8MB — crop to the holdings list.")
 
+    # content_type is client-supplied and trivially spoofed. Sniff the real
+    # bytes so a mislabelled file fails here with a clear message instead of
+    # deep inside the vision call.
+    media_type = _sniff_image(raw)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="That file isn't a readable image. Upload a PNG/JPEG/WebP screenshot.")
+
+    ai_failed = False
     if ai.have_ai():
-        holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), file.content_type)
+        holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), media_type)
         if holdings:
             return {"holdings": holdings, "method": "ai_vision"}
+        ai_failed = True
 
     holdings = ocr_tesseract.extract_holdings_tesseract(raw)
     if holdings:
-        return {
-            "holdings": holdings,
-            "method": "tesseract",
-            "note": "Read with free OCR — double-check these numbers before analyzing.",
-        }
+        note = "Read with free OCR — double-check these numbers before analyzing."
+        if ai_failed and ai.last_error():
+            # Don't quietly hand back the weaker read as if it were the good one.
+            note = "Accurate reading is unavailable right now, so this used free OCR — check every number before analyzing."
+        return {"holdings": holdings, "method": "tesseract", "note": note}
 
-    return {
-        "holdings": [],
-        "method": "none",
-        "note": "Couldn't read any holdings from that screenshot. Try a clearer, cropped photo or enter positions manually.",
-    }
+    note = "Couldn't read any holdings from that screenshot. Try a clearer, cropped photo or enter positions manually."
+    if ai_failed and ai.last_error():
+        note = "Screenshot reading is down right now. Enter your positions manually — it takes about a minute."
+    return {"holdings": [], "method": "none", "note": note}
 
 
 # ─── 3. Ask Ants (RAG chat) ─────────────────────────────────────────────────

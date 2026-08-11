@@ -220,15 +220,20 @@ class Database:
             }
 
         total_xp = current.get("xp", 0) + xp_earned
-        # Level bands (simplified: 1000 XP per 10 levels)
-        level = 1 + (total_xp // 1000)
+        # Level bands: 1000 XP per level, capped at 100.
+        level = min(100, 1 + (total_xp // 1000))
 
+        # Store LIFETIME xp, not total_xp % 1000 — the modulo threw away every
+        # completed level, so a user at 2,400 XP was written back as 400 and
+        # lost their progress on the next read.
+        # Spread `current` FIRST: it used to come last, which overwrote xp,
+        # level and updated_at with the pre-update values, making this a no-op.
         result = self.client.table("gamification").upsert({
+            **current,
             "user_id": user_id,
-            "xp": total_xp % 1000,  # XP in current level
-            "level": min(100, level),
+            "xp": total_xp,
+            "level": level,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-            **current  # preserve other fields
         }).execute()
 
         return result.data[0] if result.data else {"xp": total_xp, "level": level}
@@ -244,11 +249,14 @@ class Database:
         if achievement_id not in achievements:
             achievements.append(achievement_id)
 
+            # Same spread-order bug as update_xp: `current` last meant the new
+            # achievements list was overwritten by the old one and nothing
+            # ever unlocked.
             result = self.client.table("gamification").upsert({
+                **(current or {}),
                 "user_id": user_id,
                 "achievements": achievements,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                **(current or {})
             }).execute()
 
             return result.data[0] if result.data else {"achievement_id": achievement_id}
