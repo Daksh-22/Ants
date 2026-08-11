@@ -144,6 +144,18 @@ class Database:
         result = self.client.table("portfolios").select("*").eq("user_id", user_id).execute()
         return result.data if result.data else []
 
+    async def get_portfolio(self, portfolio_id: str) -> Optional[dict]:
+        """Get a single portfolio by id, including its user_id for ownership checks.
+
+        Returns None when the portfolio doesn't exist. Callers MUST compare
+        user_id before returning any holdings — see main._verify_portfolio_ownership.
+        """
+        if not self.client:
+            return None
+
+        result = self.client.table("portfolios").select("*").eq("id", portfolio_id).execute()
+        return result.data[0] if result.data else None
+
     async def add_holding(self, portfolio_id: str, ticker: str, qty: float, buy_price: float, sector: str) -> dict:
         """Add a holding to portfolio."""
         if not self.client:

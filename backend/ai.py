@@ -17,13 +17,36 @@ from typing import Any, Optional
 
 import rag
 
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 
 _client = None
+
+# Last AI failure, surfaced by /healthz. A configured-but-rejected key looks
+# identical to a working one from the outside — every call just silently
+# degrades — so we remember why the last call failed and say so.
+_last_error: Optional[str] = None
 
 
 def have_ai() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def last_error() -> Optional[str]:
+    return _last_error
+
+
+def _note_failure(exc: Exception) -> None:
+    """Record an AI failure. AuthenticationError means the key is bad, not absent."""
+    global _last_error
+    name = type(exc).__name__
+    if name == "AuthenticationError":
+        _last_error = "ANTHROPIC_API_KEY is set but rejected by the API (401). Check or regenerate the key."
+    elif name == "NotFoundError":
+        _last_error = f"Model '{MODEL}' was not found. Check ANTHROPIC_MODEL."
+    elif name == "RateLimitError":
+        _last_error = "Rate limited by the Anthropic API (429)."
+    else:
+        _last_error = f"{name}: {exc}"
 
 
 def _get_client():
@@ -32,6 +55,17 @@ def _get_client():
         from anthropic import Anthropic
         _client = Anthropic()
     return _client
+
+
+def _text_of(msg) -> str:
+    """Text from a response, guarding the refusal stop reason.
+
+    Current models can decline a request: HTTP 200, stop_reason 'refusal',
+    empty or partial content. Reading content[0] blindly breaks on those.
+    """
+    if getattr(msg, "stop_reason", None) == "refusal":
+        return ""
+    return "".join(b.text for b in msg.content if b.type == "text")
 
 
 VOICE = (
@@ -112,7 +146,8 @@ def extract_holdings(image_b64: str, media_type: str) -> Optional[list[dict[str,
                     if str(h.get("ticker", "")).strip() and float(h.get("qty") or 0) > 0 and float(h.get("avg") or 0) > 0
                 ]
                 return clean or None
-    except Exception:
+    except Exception as exc:
+        _note_failure(exc)
         return None
     return None
 
@@ -152,7 +187,7 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
                 ),
             }],
         )
-        text = "".join(b.text for b in msg.content if b.type == "text")
+        text = _text_of(msg)
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if not match:
             return analysis
@@ -169,7 +204,8 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
                 w["body"] = by_id_w[w["id"]].get("body", w["body"])
         analysis["generatedBy"] = "ai"
         return analysis
-    except Exception:
+    except Exception as exc:
+        _note_failure(exc)
         return analysis
 
 
@@ -201,7 +237,7 @@ def polish_verdict(check: dict[str, Any], holdings: list[dict[str, Any]]) -> dic
                 ),
             }],
         )
-        text = "".join(b.text for b in msg.content if b.type == "text").strip()
+        text = _text_of(msg).strip()
         if 20 < len(text) < 600:
             check["verdict"] = text
     except Exception:
@@ -256,7 +292,7 @@ def chat(question: str, analysis: Optional[dict[str, Any]] = None) -> dict[str, 
             ),
             messages=[{"role": "user", "content": "\n\n".join(context_parts + [f"QUESTION: {question}"])}],
         )
-        answer = "".join(b.text for b in msg.content if b.type == "text").strip()
+        answer = _text_of(msg).strip()
         return {"answer": answer, "sources": sources, "aiUsed": True}
     except Exception as exc:  # key set but call failed — degrade, don't 500
         return {"answer": f"AI call failed ({type(exc).__name__}). Try again in a moment.", "sources": sources, "aiUsed": False}

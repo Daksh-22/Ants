@@ -89,7 +89,22 @@ class OrderRequest(BaseModel):
 
 @app.get("/healthz", tags=["Ops"])
 async def healthz():
-    return {"status": "ok", "aiEnabled": ai.have_ai(), "knowledgeChunks": rag.chunk_count()}
+    """Liveness + a truthful account of which optional subsystems actually work.
+
+    aiEnabled only means a key is present. aiLastError is what matters: a key
+    that the API rejects looks fully healthy from the outside otherwise, because
+    every AI call degrades silently to the deterministic fallback.
+    """
+    return {
+        "status": "ok",
+        "aiEnabled": ai.have_ai(),
+        "aiModel": ai.MODEL,
+        "aiLastError": ai.last_error(),
+        "knowledgeChunks": rag.chunk_count(),
+        "accountsEnabled": database.db.client is not None,
+        "brokerLinkEnabled": AA_ENABLED,
+        "executionEnabled": EXECUTION_ENABLED,
+    }
 
 
 # ─── 1. Portfolio analysis ───────────────────────────────────────────────────
@@ -212,45 +227,60 @@ async def rag_search(q: str, k: int = 4):
     return {"query": q, "results": rag.retrieve(q, k=min(k, 10))}
 
 
-# ─── 4. Account Aggregator (mock — swap for Setu/Finvu sandbox) ─────────────
+# ─── 4. Account Aggregator ──────────────────────────────────────────────────
+#
+# NOT IMPLEMENTED. These endpoints previously returned the built-in Arjun Mehta
+# demo portfolio to EVERY caller, while the UI presented it as "your broker
+# data". That is the single most misleading thing this app could ship, so both
+# endpoints now fail loudly instead of lying quietly.
+#
+# To turn this on for real you need a licensed AA aggregator (Setu, Finvu,
+# Onemoney) — that requires an RBI-regulated FIU registration and a commercial
+# agreement. Wire the real client here, then flip AA_ENABLED.
+
+AA_ENABLED = os.environ.get("AA_ENABLED", "0") == "1"
+_AA_UNAVAILABLE = (
+    "Broker linking isn't available yet — it needs a licensed Account Aggregator "
+    "connection. Upload a screenshot or enter your holdings manually instead."
+)
+
 
 @app.post("/api/aa/initiate-sync", tags=["Account Aggregator"])
 async def initiate_aa_sync(payload: AASyncRequest):
-    """Step 1: FIU requests consent. Production: Setu/Moneyone sandbox call."""
-    await asyncio.sleep(1.2)
-    return {
-        "status": "success",
-        "message": "Consent request generated successfully.",
-        "redirectUrl": f"https://sandbox.setu.co/aa/consent/mock_req_{payload.mobile}",
-        "consentHandle": f"cons_{random.randint(10000, 99999)}",
-    }
+    """Step 1: FIU requests consent. Requires a real AA aggregator integration."""
+    if not AA_ENABLED:
+        raise HTTPException(status_code=503, detail=_AA_UNAVAILABLE)
+    raise HTTPException(status_code=501, detail="AA_ENABLED is set but no aggregator client is wired up.")
 
 
 @app.post("/api/aa/webhook", tags=["Account Aggregator"])
 async def aa_data_ready_webhook(consentHandle: str):
     """Step 2: consent approved → decrypted FIP holdings → real analysis."""
-    return {"status": "DATA_READY", "analysis": engine.demo_analysis(source="broker")}
+    if not AA_ENABLED:
+        raise HTTPException(status_code=503, detail=_AA_UNAVAILABLE)
+    raise HTTPException(status_code=501, detail="AA_ENABLED is set but no aggregator client is wired up.")
 
 
-# ─── 5. Execution engine (mock — swap for Angel One SmartAPI) ───────────────
+# ─── 5. Execution engine ────────────────────────────────────────────────────
+#
+# NOT IMPLEMENTED. This previously returned {"status": "EXECUTED", ...} and told
+# the user "Bought 10x HAL" — for an order that was never placed. Reporting a
+# fake fill to someone who believes they now hold a position is the worst
+# failure mode in this codebase. It stays off until a real broker API is wired
+# in behind a real, authenticated, consented order flow.
+
+EXECUTION_ENABLED = os.environ.get("EXECUTION_ENABLED", "0") == "1"
+
 
 @app.post("/api/execution/order", tags=["Execution"])
 async def execute_protected_order(order: OrderRequest):
-    """Places a (mock) order with a mandatory 8% trailing stop-loss bundled."""
-    transaction_id = f"ANGEL_{random.randint(100000, 999999)}"
-    tsl_trigger_price = round(order.price * 0.92, 2)
-    return {
-        "status": "EXECUTED",
-        "primary_order_id": transaction_id,
-        "symbol": order.symbol,
-        "execution_price": order.price,
-        "risk_management": {
-            "strategy": "Trailing Stop-Loss",
-            "initial_trigger_price": tsl_trigger_price,
-            "max_drawdown_allowed": "8.0%",
-        },
-        "message": f"Bought {order.qty}x {order.symbol}. Downside capped at {tsl_trigger_price}.",
-    }
+    """Order placement. Disabled until a real broker integration exists."""
+    if not EXECUTION_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Ants doesn't place trades. Take this to your broker.",
+        )
+    raise HTTPException(status_code=501, detail="EXECUTION_ENABLED is set but no broker client is wired up.")
 
 
 # ─── 6. Swarm Radar (WebSocket) ─────────────────────────────────────────────
@@ -313,30 +343,38 @@ class TokenResponse(BaseModel):
     email: str
 
 
+# Accounts require a real user store. Without Supabase configured, signup
+# minted a token for anyone and login accepted ANY password for ANY email —
+# an open door to every /api/portfolios endpoint. The whole surface is gated
+# on a configured backing store rather than shipped in mock form.
+def _require_account_store() -> None:
+    if database.db.client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Accounts aren't enabled on this deployment. Set SUPABASE_URL and SUPABASE_KEY.",
+        )
+
+
 @app.post("/api/auth/signup", tags=["Auth"], response_model=TokenResponse)
 async def signup(payload: SignupRequest):
     """Create a new user account."""
+    _require_account_store()
     valid, msg = auth.validate_password(payload.password)
     if not valid:
         raise HTTPException(status_code=400, detail=msg)
 
-    # For MVP: mock user creation. Production: call Supabase Auth.
-    import uuid
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    token = auth.create_access_token(user_id, payload.email)
-
-    return {"access_token": token, "user_id": user_id, "email": payload.email}
+    # TODO: create the user via Supabase Auth and persist auth.hash_password(...).
+    raise HTTPException(status_code=501, detail="Signup is not wired to the user store yet.")
 
 
 @app.post("/api/auth/login", tags=["Auth"], response_model=TokenResponse)
 async def login(payload: LoginRequest):
     """Login to existing account."""
-    # For MVP: mock login. Production: verify against Supabase Auth.
-    import uuid
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    token = auth.create_access_token(user_id, payload.email)
+    _require_account_store()
 
-    return {"access_token": token, "user_id": user_id, "email": payload.email}
+    # TODO: look the user up and verify with auth.verify_password(...).
+    # Never mint a token without checking the password.
+    raise HTTPException(status_code=501, detail="Login is not wired to the user store yet.")
 
 
 @app.get("/api/auth/profile", tags=["Auth"])
