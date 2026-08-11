@@ -77,11 +77,28 @@ def _norm(ticker: str) -> str:
     return "".join(ch for ch in ticker.upper().strip() if ch.isalnum() or ch == "&")
 
 
-def price_position(ticker: str, qty: float, avg: float) -> dict[str, Any]:
+def price_position(
+    ticker: str,
+    qty: float,
+    avg: float,
+    quote: Any | None = None,
+) -> dict[str, Any]:
+    """Price one position. `quote` is an optional quotes.Quote resolved live;
+    without it we fall back to the static KNOWN_STOCKS snapshot, and without
+    that to the user's own avg (a flat 0% — honest about not knowing)."""
     key = _norm(ticker)
-    name, sector, cmp_ = KNOWN_STOCKS.get(key, (ticker.strip() or key, "Other", avg))
+
+    if quote is not None:
+        name, sector, cmp_ = quote.name, quote.sector, float(quote.price)
+        price_source = quote.source
+    else:
+        name, sector, cmp_ = KNOWN_STOCKS.get(key, (ticker.strip() or key, "Other", avg))
+        price_source = "reference" if key in KNOWN_STOCKS else "unpriced"
+
     if cmp_ <= 0:
         cmp_ = avg
+        price_source = "unpriced"
+
     value = qty * cmp_
     invested = qty * avg
     ret = ((cmp_ - avg) / avg * 100) if avg > 0 else 0.0
@@ -95,16 +112,43 @@ def price_position(ticker: str, qty: float, avg: float) -> dict[str, Any]:
         "value": round(value, 2),
         "invested": round(invested, 2),
         "returnPct": round(ret, 1),
-        "known": key in KNOWN_STOCKS,
+        "known": price_source != "unpriced",
+        # live | reference | unpriced — the UI tells the user which it got
+        "priceSource": price_source,
     }
 
 
 def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str, Any]:
-    """positions: [{ticker, qty, avg}] → full Analysis object."""
-    holdings = [
-        price_position(str(p.get("ticker", "")), float(p.get("qty") or 0), float(p.get("avg") or 0))
-        for p in positions
+    """positions: [{ticker, qty, avg}] → full Analysis object.
+
+    Resolves live quotes for every ticker up front (one concurrent batch), so
+    any Indian stock gets a real price — not just the ~37 curated ones.
+    """
+    valid = [
+        p for p in positions
         if str(p.get("ticker", "")).strip() and float(p.get("qty") or 0) > 0 and float(p.get("avg") or 0) > 0
+    ]
+
+    # one batched, concurrent, deadline-bounded quote fetch for the whole book
+    quote_map: dict[str, Any] = {}
+    if valid:
+        try:
+            import quotes
+            avg_by_ticker = {
+                _norm(str(p.get("ticker", ""))): float(p.get("avg") or 0) for p in valid
+            }
+            quote_map = quotes.resolve_quotes(list(avg_by_ticker.keys()), avg_by_ticker)
+        except Exception:
+            quote_map = {}  # network/import trouble → static fallback below
+
+    holdings = [
+        price_position(
+            str(p.get("ticker", "")),
+            float(p.get("qty") or 0),
+            float(p.get("avg") or 0),
+            quote_map.get(_norm(str(p.get("ticker", "")))),
+        )
+        for p in valid
     ]
     holdings = [h for h in holdings if h["value"] > 0]
     if not holdings:
@@ -320,6 +364,20 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
         for f in flags if f.get("fix")
     ][:3]
 
+    # be explicit about how well we could price this book — the UI says so
+    live_count = sum(1 for h in holdings if h["priceSource"] == "live")
+    unpriced = [h["ticker"] for h in holdings if h["priceSource"] == "unpriced"]
+    if live_count == len(holdings):
+        pricing_note = None
+    elif unpriced:
+        pricing_note = (
+            f"Couldn't find a live price for {', '.join(unpriced[:3])}"
+            + (f" +{len(unpriced) - 3} more" if len(unpriced) > 3 else "")
+            + " — those show 0% return, so the totals understate reality."
+        )
+    else:
+        pricing_note = "Some prices came from our reference snapshot, not live quotes."
+
     return {
         "source": source,
         "generatedBy": "engine",
@@ -336,6 +394,12 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
         "working": working,
         "moves": moves,
         "holdings": holdings,
+        "pricing": {
+            "livePriced": live_count,
+            "total": len(holdings),
+            "unpricedTickers": unpriced,
+            "note": pricing_note,
+        },
     }
 
 
@@ -368,8 +432,22 @@ def check_ticker(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     total = analysis["summary"]["totalValue"]
 
     key = _norm(ticker)
-    name, sector, cmp_ = KNOWN_STOCKS.get(key, (ticker.strip().upper() or key, "Other", 0.0))
-    known = key in KNOWN_STOCKS
+
+    # resolve the tipped ticker live so ANY Indian stock can be checked, not
+    # just the ~37 curated ones; fall back to the snapshot, then to unknown
+    name, sector, cmp_ = ticker.strip().upper() or key, "Other", 0.0
+    known = False
+    try:
+        import quotes
+        q = quotes.resolve_quotes([key]).get(key)
+        if q and q.source != "unpriced" and q.price > 0:
+            name, sector, cmp_ = q.name, q.sector, float(q.price)
+            known = True
+    except Exception:
+        pass
+    if not known and key in KNOWN_STOCKS:
+        name, sector, cmp_ = KNOWN_STOCKS[key]
+        known = True
 
     # Canonicalize: find all holdings of the same company by matching to the display name
     # This handles aliases like HDFC↔HDFCBANK which both map to "HDFC Bank"
@@ -408,11 +486,11 @@ def check_ticker(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
             f"Telegram group or a YouTube thumbnail, that's already your answer. Unlisted, "
             f"micro-cap, or misspelled: none of those deserve your money today."
         )
-    elif own and own_weight >= 15:
+    elif matching_holdings and own_weight >= 15:
         tone = "warn"
         verdict = (
             f"You already hold {name} at {own_weight:.0f}% of your portfolio "
-            f"({own['returnPct']:+.1f}% so far). This tip isn't conviction, it's a rerun — "
+            f"({ownReturnPct:+.1f}% so far). This tip isn't conviction, it's a rerun — "
             f"adding more makes one stock your whole story."
         )
     elif sector_after > 45:
@@ -422,10 +500,10 @@ def check_ticker(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
             f"(from {sector_now:.0f}%). That's not a new idea — it's more of the same bet "
             f"wearing a different name. Skip, or trim the sector first."
         )
-    elif own:
+    elif matching_holdings:
         tone = "caution"
         verdict = (
-            f"You already own {name} ({own_weight:.0f}%, {own['returnPct']:+.1f}%). Averaging "
+            f"You already own {name} ({own_weight:.0f}%, {ownReturnPct:+.1f}%). Averaging "
             f"into a position you hold is fine — if it's a plan, not a dopamine buy. "
             f"Decide the target weight before you tap buy."
         )

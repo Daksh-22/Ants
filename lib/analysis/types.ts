@@ -54,6 +54,17 @@ export interface AnalysisHolding {
   returnPct: number;
   weightPct: number;
   known: boolean;
+  /** how this holding got its price — live quote, stale reference snapshot,
+   *  or not priced at all (return shows 0%). Older payloads omit it. */
+  priceSource?: "live" | "reference" | "unpriced";
+}
+
+/** how well the whole book could be priced — drives an honesty banner */
+export interface AnalysisPricing {
+  livePriced: number;
+  total: number;
+  unpricedTickers: string[];
+  note: string | null;
 }
 
 export interface Analysis {
@@ -67,6 +78,8 @@ export interface Analysis {
   working: AnalysisWorking[];
   moves: AnalysisMove[];
   holdings: AnalysisHolding[];
+  /** pricing quality for this run — absent on older/demo payloads */
+  pricing?: AnalysisPricing;
   /** set by the OCR endpoint: whether AI actually read the screenshot */
   aiUsed?: boolean;
   note?: string;

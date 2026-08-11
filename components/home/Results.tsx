@@ -220,6 +220,16 @@ export function Results() {
           Invested {formatINR(analysis.summary.invested)}
           {sourceLabels[analysis.source] ? ` · ${sourceLabels[analysis.source]}` : ""}
         </p>
+        {analysis.pricing && analysis.pricing.total > 0 && (
+          analysis.pricing.note ? (
+            <p className="mt-1.5 text-[11px] leading-snug text-amber">{analysis.pricing.note}</p>
+          ) : (
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-teal">
+              <span className="h-1.5 w-1.5 rounded-full bg-teal" />
+              Live prices · all {analysis.pricing.total} holdings
+            </p>
+          )
+        )}
       </Reveal>
 
       <div className="space-y-7 px-5">
