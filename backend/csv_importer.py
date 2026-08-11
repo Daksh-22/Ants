@@ -75,24 +75,31 @@ def parse_csv_holdings(csv_content: str) -> Tuple[List[Dict], List[str]]:
         if not reader.fieldnames:
             return [], ["No headers found in CSV"]
 
-        headers = [h.strip().lower() for h in reader.fieldnames] if reader.fieldnames else []
+        # Create mapping from original headers to normalized names
+        header_map = {}
+        normalized_headers = []
+        for orig_header in reader.fieldnames:
+            normalized = orig_header.strip().lower()
+            header_map[normalized] = orig_header
+            normalized_headers.append(normalized)
 
         # Map various column names
-        ticker_col = next((h for h in headers if h in ["ticker", "symbol", "stock", "company"]), None)
-        qty_col = next((h for h in headers if h in ["qty", "quantity", "shares", "units"]), None)
-        price_col = next((h for h in headers if h in ["avg_price", "avg_cost", "buy_price", "cost", "price"]), None)
-        sector_col = next((h for h in headers if h in ["sector", "industry", "segment"]), None)
+        ticker_col = next((h for h in normalized_headers if h in ["ticker", "symbol", "stock", "company"]), None)
+        qty_col = next((h for h in normalized_headers if h in ["qty", "quantity", "shares", "units"]), None)
+        price_col = next((h for h in normalized_headers if h in ["avg_price", "avg_cost", "buy_price", "cost", "price"]), None)
+        sector_col = next((h for h in normalized_headers if h in ["sector", "industry", "segment"]), None)
 
         if not (ticker_col and qty_col and price_col):
-            return [], [f"CSV must have columns: ticker, qty, buy_price. Found: {headers}"]
+            return [], [f"CSV must have columns: ticker, qty, buy_price. Found: {normalized_headers}"]
 
         row_num = 2
         for row in reader:
             try:
-                ticker = (row.get(ticker_col, "") or "").strip().upper()
-                qty_str = (row.get(qty_col, "") or "").strip()
-                price_str = (row.get(price_col, "") or "").strip()
-                sector = (row.get(sector_col, "") or "").strip() if sector_col else "Other"
+                # Use the original column names from the CSV
+                ticker = (row.get(header_map.get(ticker_col, ticker_col), "") or "").strip().upper()
+                qty_str = (row.get(header_map.get(qty_col, qty_col), "") or "").strip()
+                price_str = (row.get(header_map.get(price_col, price_col), "") or "").strip()
+                sector = (row.get(header_map.get(sector_col, sector_col), "") or "").strip() if sector_col else "Other"
 
                 # Validation
                 if not ticker:

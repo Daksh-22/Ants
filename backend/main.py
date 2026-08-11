@@ -321,7 +321,8 @@ async def signup(payload: SignupRequest):
         raise HTTPException(status_code=400, detail=msg)
 
     # For MVP: mock user creation. Production: call Supabase Auth.
-    user_id = f"user_{random.randint(100000, 999999)}"
+    import uuid
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
     token = auth.create_access_token(user_id, payload.email)
 
     return {"access_token": token, "user_id": user_id, "email": payload.email}
@@ -331,7 +332,8 @@ async def signup(payload: SignupRequest):
 async def login(payload: LoginRequest):
     """Login to existing account."""
     # For MVP: mock login. Production: verify against Supabase Auth.
-    user_id = f"user_{random.randint(100000, 999999)}"
+    import uuid
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
     token = auth.create_access_token(user_id, payload.email)
 
     return {"access_token": token, "user_id": user_id, "email": payload.email}
@@ -424,6 +426,12 @@ async def add_holding(
     current_user: dict = Depends(auth.get_current_user),
 ):
     """Add a holding to a portfolio."""
+    user_id = current_user.get("user_id")
+    await _verify_portfolio_ownership(portfolio_id, user_id)
+
+    if payload.qty <= 0 or payload.buy_price <= 0:
+        raise HTTPException(status_code=400, detail="Quantity and buy price must be positive")
+
     holding = await database.db.add_holding(
         portfolio_id,
         payload.ticker,
@@ -434,9 +442,19 @@ async def add_holding(
     return holding
 
 
+async def _verify_portfolio_ownership(portfolio_id: str, user_id: str):
+    """Verify that user owns the portfolio. Raises 403 if not."""
+    portfolio = await database.db.get_portfolio(portfolio_id)
+    if not portfolio or portfolio.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied. Portfolio not found or not owned by you.")
+    return portfolio
+
+
 @app.get("/api/portfolios/{portfolio_id}/holdings", tags=["Holdings"])
 async def get_holdings(portfolio_id: str, current_user: dict = Depends(auth.get_current_user)):
     """Get all holdings in a portfolio."""
+    user_id = current_user.get("user_id")
+    await _verify_portfolio_ownership(portfolio_id, user_id)
     holdings = await database.db.get_holdings(portfolio_id)
     return holdings
 
@@ -446,6 +464,8 @@ async def get_holdings(portfolio_id: str, current_user: dict = Depends(auth.get_
 @app.get("/api/portfolios/{portfolio_id}/analysis", tags=["Analysis"])
 async def analyze_portfolio_live(portfolio_id: str, current_user: dict = Depends(auth.get_current_user)):
     """Analyze portfolio with live prices."""
+    user_id = current_user.get("user_id")
+    await _verify_portfolio_ownership(portfolio_id, user_id)
     holdings = await database.db.get_holdings(portfolio_id)
 
     if not holdings:

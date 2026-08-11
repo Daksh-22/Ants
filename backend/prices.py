@@ -152,12 +152,13 @@ def get_portfolio_metrics(holdings: List[Dict]) -> Dict:
             current = qty * cmp
             current_value += current
 
+            gain_loss_pct = (((current - invested) / invested) * 100) if invested > 0 else 0
             positions_with_prices.append({
                 **holding,
                 "cmp": cmp,
                 "current_value": round(current, 2),
                 "gain_loss": round(current - invested, 2),
-                "gain_loss_pct": round(((current - invested) / invested) * 100, 2),
+                "gain_loss_pct": round(gain_loss_pct, 2),
                 "change_pct": price_data["change_pct"],
             })
         else:

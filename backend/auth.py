@@ -12,7 +12,9 @@ from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 
-SECRET_KEY = os.environ.get("JWT_SECRET", "dev-secret-key-change-in-production")
+SECRET_KEY = os.environ.get("JWT_SECRET")
+if not SECRET_KEY:
+    raise ValueError("JWT_SECRET environment variable is required. Set it before running the app.")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24 * 7  # 1 week
 
@@ -61,12 +63,12 @@ def validate_password(password: str) -> tuple[bool, str]:
 
 
 def hash_password(password: str) -> str:
-    """Hash password (use bcrypt in production)."""
-    # For MVP: return a simple placeholder. In production, use bcrypt.
-    import hashlib
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash password using bcrypt."""
+    import bcrypt
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against hash."""
-    return hash_password(password) == hashed
+    """Verify password against bcrypt hash."""
+    import bcrypt
+    return bcrypt.checkpw(password.encode(), hashed.encode())
