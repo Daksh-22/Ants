@@ -9,7 +9,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 
 SECRET_KEY = os.environ.get("JWT_SECRET", "dev-secret-key-change-in-production")
@@ -43,7 +43,7 @@ def verify_token(token: str) -> dict:
 security = HTTPBearer()
 
 
-async def get_current_user(credentials: HTTPAuthCredentials = Depends(security)) -> dict:
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     """Extract and verify user from Authorization header."""
     token = credentials.credentials
     return verify_token(token)

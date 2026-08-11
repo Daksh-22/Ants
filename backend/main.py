@@ -35,6 +35,7 @@ import rag
 import auth
 import database
 import prices
+import ocr_tesseract
 from csv_importer import csv_to_holdings
 
 app = FastAPI(
@@ -164,6 +165,39 @@ async def ocr_screenshot(file: UploadFile = File(...)):
             pass
     return {**engine.demo_analysis(source="screenshot"), "aiUsed": False,
             "note": "Couldn't read the screenshot (AI OCR unavailable) — showing the demo analysis."}
+
+
+@app.post("/api/ocr/extract", tags=["Analysis"])
+async def ocr_extract(file: UploadFile = File(...)):
+    """Screenshot → best-effort extracted holdings for the user to REVIEW,
+    not a final analysis. Uses Claude vision when ANTHROPIC_API_KEY is set
+    (accurate); otherwise falls back to free local Tesseract OCR (rougher —
+    the frontend routes these into an editable form rather than trusting
+    them blindly). Never silently substitutes demo data."""
+    if file.content_type not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+        raise HTTPException(status_code=415, detail="Upload a PNG/JPEG/WebP screenshot.")
+    raw = await file.read()
+    if len(raw) > 8_000_000:
+        raise HTTPException(status_code=413, detail="Image over 8MB — crop to the holdings list.")
+
+    if ai.have_ai():
+        holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), file.content_type)
+        if holdings:
+            return {"holdings": holdings, "method": "ai_vision"}
+
+    holdings = ocr_tesseract.extract_holdings_tesseract(raw)
+    if holdings:
+        return {
+            "holdings": holdings,
+            "method": "tesseract",
+            "note": "Read with free OCR — double-check these numbers before analyzing.",
+        }
+
+    return {
+        "holdings": [],
+        "method": "none",
+        "note": "Couldn't read any holdings from that screenshot. Try a clearer, cropped photo or enter positions manually.",
+    }
 
 
 # ─── 3. Ask Ants (RAG chat) ─────────────────────────────────────────────────

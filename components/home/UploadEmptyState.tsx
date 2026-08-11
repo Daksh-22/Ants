@@ -3,7 +3,12 @@
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Lock, Loader2, Upload, PenLine, ChevronRight, AlertCircle } from "lucide-react";
-import { analyzeBroker, analyzePositions, analyzeScreenshot } from "@/lib/api/portfolio";
+import {
+  analyzeBroker,
+  analyzePositions,
+  extractHoldingsFromScreenshot,
+  type RawPosition,
+} from "@/lib/api/portfolio";
 import { ManualEntry, type ManualPosition } from "@/components/home/ManualEntry";
 import { useCountUp } from "@/lib/hooks/useCountUp";
 import type { Analysis } from "@/lib/analysis/types";
@@ -23,15 +28,21 @@ interface UploadEmptyStateProps {
 /**
  * STATE 1 — onboarding. Three ways in, so account-linking is never a wall:
  *   1. Link your broker (Account Aggregator — real, most accurate) — PRIMARY
- *   2. Upload a screenshot (Claude-vision OCR — no account needed)
+ *   2. Upload a screenshot (OCR → editable review, no account needed)
  *   3. Enter positions manually (full control, no account)
- * All three produce an Analysis via the backend and converge on processing →
- * results. Backend down → the state machine falls back to demo analysis.
+ *
+ * Screenshots deliberately do NOT go straight to an analysis: OCR is a guess,
+ * so the extracted rows land in the manual-entry form for the user to confirm
+ * or correct first. That way an imperfect read still produces a real,
+ * personal analysis instead of silently showing demo numbers.
  */
 export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
-  const [view, setView] = useState<"choose" | "manual">("choose");
+  const [view, setView] = useState<"choose" | "manual" | "review">("choose");
   const [linking, setLinking] = useState(false);
+  const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [extracted, setExtracted] = useState<RawPosition[]>([]);
+  const [reviewNote, setReviewNote] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
   const scanCount = useCountUp(12431, 1400);
 
@@ -48,9 +59,33 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
     }
   };
 
-  const handleFile = (file: File | undefined) => {
+  const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    onStart(() => analyzeScreenshot(file));
+    setReading(true);
+    setError(null);
+    try {
+      const result = await extractHoldingsFromScreenshot(file);
+      if (result.holdings.length === 0) {
+        setError(
+          result.note ||
+            "Couldn't read any holdings from that screenshot. Try a clearer, cropped photo — or type them in."
+        );
+        return;
+      }
+      setExtracted(result.holdings);
+      setReviewNote(
+        result.method === "tesseract"
+          ? `Read ${result.holdings.length} holding${result.holdings.length > 1 ? "s" : ""} with free OCR — check the numbers against your app before analyzing.`
+          : `Read ${result.holdings.length} holding${result.holdings.length > 1 ? "s" : ""} from your screenshot. Fix anything that looks off.`
+      );
+      setView("review");
+    } catch {
+      setError("Couldn't reach the screenshot reader right now — try manual entry instead.");
+    } finally {
+      setReading(false);
+      // let the same file be picked again after a failure
+      if (fileRef.current) fileRef.current.value = "";
+    }
   };
 
   const handleManualSubmit = (positions: ManualPosition[]) => {
@@ -67,6 +102,17 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
 
   if (view === "manual") {
     return <ManualEntry onBack={() => setView("choose")} onSubmit={handleManualSubmit} />;
+  }
+
+  if (view === "review") {
+    return (
+      <ManualEntry
+        onBack={() => setView("choose")}
+        onSubmit={handleManualSubmit}
+        initialPositions={extracted}
+        reviewBanner={reviewNote}
+      />
+    );
   }
 
   return (
@@ -90,13 +136,13 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
             truth — not what you want to hear.
           </p>
 
-          {/* hidden file input — screenshot goes to Claude-vision OCR */}
+          {/* hidden file input — screenshot goes to OCR, then the review form */}
           <input
             ref={fileRef}
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
+            onChange={(e) => void handleFile(e.target.files?.[0])}
           />
 
           {/* PRIMARY — link broker (real, most accurate). Solid gold, the hero action. */}
@@ -138,17 +184,28 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
               type="button"
               whileTap={{ scale: 0.97 }}
               onClick={() => fileRef.current?.click()}
-              className="group flex w-full items-center gap-3 rounded-2xl border border-subtle bg-gradient-to-b from-white/[0.04] to-transparent bg-surface px-4 py-3.5 text-left transition-colors hover:border-strong hover:bg-elevated"
+              disabled={reading}
+              className="group flex w-full items-center gap-3 rounded-2xl border border-subtle bg-gradient-to-b from-white/[0.04] to-transparent bg-surface px-4 py-3.5 text-left transition-colors hover:border-strong hover:bg-elevated disabled:opacity-70"
             >
-              <Upload size={20} strokeWidth={2.2} className="shrink-0 text-gold" />
+              {reading ? (
+                <Loader2 size={20} className="shrink-0 animate-spin text-gold" />
+              ) : (
+                <Upload size={20} strokeWidth={2.2} className="shrink-0 text-gold" />
+              )}
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-semibold text-primary">Upload a screenshot</span>
-                <span className="block text-[12px] text-muted">AI reads it · Groww · Zerodha · Kuvera</span>
+                <span className="block text-[15px] font-semibold text-primary">
+                  {reading ? "Reading your screenshot…" : "Upload a screenshot"}
+                </span>
+                <span className="block text-[12px] text-muted">
+                  {reading ? "Pulling out tickers, qty and avg price" : "You confirm what we read · Groww · Zerodha · Kuvera"}
+                </span>
               </span>
-              <ChevronRight
-                size={18}
-                className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-              />
+              {!reading && (
+                <ChevronRight
+                  size={18}
+                  className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+                />
+              )}
             </motion.button>
 
             <motion.button

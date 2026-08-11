@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Plus, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useCountUp } from "@/lib/hooks/useCountUp";
 import { formatINR } from "@/lib/utils/formatINR";
@@ -18,6 +18,10 @@ export interface ManualPosition {
 interface ManualEntryProps {
   onBack: () => void;
   onSubmit: (positions: ManualPosition[]) => void;
+  /** pre-fill rows — used when arriving from OCR review instead of a blank form */
+  initialPositions?: { ticker: string; qty: number; avg: number }[];
+  /** shown above the form when rows came from OCR — e.g. "double-check these numbers" */
+  reviewBanner?: string;
 }
 
 const newId = () =>
@@ -32,11 +36,22 @@ const inputCls =
 
 /**
  * Manual position entry — the no-account, full-control path. Add rows of
- * ticker / quantity / average buy price. Captured to localStorage, then the
- * (mocked) analysis runs. Real OCR/AA parsing replaces the mock later.
+ * ticker / quantity / average buy price. Also doubles as the OCR review
+ * screen: when `initialPositions` is passed (from a screenshot extraction),
+ * the form pre-fills with those guesses instead of two blank rows, so the
+ * user corrects mistakes rather than blindly trusting free OCR.
  */
-export function ManualEntry({ onBack, onSubmit }: ManualEntryProps) {
-  const [rows, setRows] = useState<ManualPosition[]>([emptyRow(), emptyRow()]);
+export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }: ManualEntryProps) {
+  const [rows, setRows] = useState<ManualPosition[]>(() =>
+    initialPositions && initialPositions.length > 0
+      ? initialPositions.map((p) => ({
+          id: newId(),
+          ticker: p.ticker,
+          qty: String(p.qty),
+          avg: String(p.avg),
+        }))
+      : [emptyRow(), emptyRow()]
+  );
   const [triedSubmit, setTriedSubmit] = useState(false);
 
   const update = (id: string, field: keyof ManualPosition, value: string) =>
@@ -79,11 +94,22 @@ export function ManualEntry({ onBack, onSubmit }: ManualEntryProps) {
           <button onClick={onBack} aria-label="Back" className="-m-1 p-1 text-secondary">
             <ArrowLeft size={22} strokeWidth={2.2} />
           </button>
-          <h1 className="text-[22px] font-bold text-primary">Add your positions</h1>
+          <h1 className="text-[22px] font-bold text-primary">
+            {reviewBanner ? "Confirm your positions" : "Add your positions"}
+          </h1>
         </div>
         <p className="mt-2 text-[14px] leading-relaxed text-secondary">
-          Add what you hold — even your 3–4 biggest is enough to get a real read.
+          {reviewBanner
+            ? "Fix anything that's wrong, then analyze."
+            : "Add what you hold — even your 3–4 biggest is enough to get a real read."}
         </p>
+
+        {reviewBanner && (
+          <div className="mt-3 flex items-start gap-2.5 rounded-xl bg-amber-dim px-3.5 py-2.5">
+            <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber" />
+            <p className="text-[12px] leading-snug text-amber">{reviewBanner}</p>
+          </div>
+        )}
 
         {/* column labels */}
         <div className="mt-6 grid grid-cols-[1fr_56px_88px_24px] gap-2 px-1 text-label uppercase text-muted">

@@ -47,6 +47,25 @@ export async function analyzeScreenshot(file: File): Promise<Analysis> {
   return request<Analysis>("/api/ocr/screenshot", { method: "POST", body: form });
 }
 
+export interface ExtractedHoldings {
+  holdings: RawPosition[];
+  /** ai_vision (accurate, needs a key) | tesseract (free, rougher) | none */
+  method: "ai_vision" | "tesseract" | "none";
+  note?: string;
+}
+
+/**
+ * Screenshot → best-effort extracted holdings for the user to REVIEW before
+ * analysis runs — never a final answer on its own. Free OCR (tesseract) is
+ * meaningfully less accurate than AI vision, so the caller should route the
+ * result into an editable form rather than trusting it blindly.
+ */
+export async function extractHoldingsFromScreenshot(file: File): Promise<ExtractedHoldings> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<ExtractedHoldings>("/api/ocr/extract", { method: "POST", body: form });
+}
+
 /** Broker path: AA consent (mock) then the data-ready webhook → analysis. */
 export async function analyzeBroker(): Promise<Analysis> {
   const consent = await request<{ consentHandle: string }>("/api/aa/initiate-sync", {
