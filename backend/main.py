@@ -7,9 +7,14 @@ Domains:
   1. Portfolio analysis  — real math (engine.py) + optional Claude polish (ai.py)
   2. Screenshot OCR      — Claude vision → holdings → analysis
   3. Ask Ants            — RAG-grounded chat (rag.py + ai.py)
-  4. Account Aggregator  — consent-flow mock (swap for Setu/Finvu sandbox)
-  5. Execution engine    — order mock with auto trailing stop-loss
-  6. Swarm Radar         — live momentum WebSocket feed
+  4. Index benchmarks    — live Nifty 50 / Sensex / Midcap trailing returns
+
+Deliberately NOT implemented — these return 503 rather than simulated data,
+because each previously returned invented values the UI presented as real:
+  * Account Aggregator (broker linking) — AA_ENABLED
+  * Order execution                     — EXECUTION_ENABLED
+  * Swarm Radar momentum feed           — SWARM_RADAR_ENABLED
+  * Accounts / portfolios               — needs SUPABASE_URL + SUPABASE_KEY
 
 Env: ANTHROPIC_API_KEY (optional — enables AI), ANTHROPIC_MODEL,
      ALLOWED_ORIGINS (comma-separated, for the deployed frontend), PORT.
@@ -29,6 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import ai
+import benchmarks
 import engine
 import metrics
 import rag
@@ -163,23 +169,35 @@ async def check_tip(payload: CheckRequest):
 @app.post("/api/ocr/screenshot", tags=["Analysis"])
 async def ocr_screenshot(file: UploadFile = File(...)):
     """Holdings screenshot → Claude vision extraction → Analysis.
-    Without an API key (or an unreadable image) returns the demo analysis,
-    flagged with aiUsed=false so the frontend can say so honestly."""
+
+    Prefer /api/ocr/extract: it returns holdings for the user to confirm before
+    any analysis runs, which is the honest flow for a best-effort OCR read.
+    This endpoint used to fall back to the built-in demo portfolio when the
+    read failed — a different user's numbers, presented as an analysis of your
+    screenshot. It now fails instead.
+    """
     if file.content_type not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
         raise HTTPException(status_code=415, detail="Upload a PNG/JPEG/WebP screenshot.")
     raw = await file.read()
     if len(raw) > 8_000_000:
         raise HTTPException(status_code=413, detail="Image over 8MB — crop to the holdings list.")
 
-    holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), file.content_type)
+    media_type = _sniff_image(raw)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="That file isn't a readable image. Upload a PNG/JPEG/WebP screenshot.")
+
+    holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), media_type)
     if holdings:
         try:
             analysis = engine.analyze(holdings, source="screenshot")
             return {**ai.polish_analysis(analysis), "aiUsed": True}
         except ValueError:
             pass
-    return {**engine.demo_analysis(source="screenshot"), "aiUsed": False,
-            "note": "Couldn't read the screenshot (AI OCR unavailable) — showing the demo analysis."}
+
+    detail = "Couldn't read any holdings from that screenshot. Try a clearer, cropped photo, or enter your positions manually."
+    if ai.last_error():
+        detail = "Screenshot reading is unavailable right now. Enter your positions manually — it takes about a minute."
+    raise HTTPException(status_code=422, detail=detail)
 
 
 def _sniff_image(raw: bytes) -> Optional[str]:
@@ -322,27 +340,43 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+SWARM_RADAR_ENABLED = os.environ.get("SWARM_RADAR_ENABLED", "0") == "1"
+
+
 @app.websocket("/ws/swarm-radar")
 async def swarm_radar(ws: WebSocket):
-    """Streams simulated momentum breakouts (production: aggregated order flow)."""
+    """Momentum feed. Disabled — there is no real order-flow source behind it.
+
+    This used to emit random.choice(sectors) / random.uniform(1.5, 4.5) /
+    random.randint(400, 1200) every 3 seconds, and the UI rendered it under a
+    pulsing "LIVE" badge with a buy button next to it: invented volume spikes
+    and invented crowd sizes driving real money decisions. Closing the socket
+    is the only honest behaviour until aggregated order flow actually exists.
+    """
+    if not SWARM_RADAR_ENABLED:
+        await ws.close(code=1011, reason="Swarm Radar has no live data source.")
+        return
+
     await manager.connect(ws)
     try:
         while True:
             await asyncio.sleep(3)
-            sectors = ["AI Infra", "Defense", "Power", "EMS", "Railways"]
-            payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "event": "MOMENTUM_SPIKE",
-                "data": {
-                    "sector": random.choice(sectors),
-                    "volume_multiplier": round(random.uniform(1.5, 4.5), 2),
-                    "ants_accumulating": random.randint(400, 1200),
-                    "technical_context": "VCP breakout detected on the 15m timeframe.",
-                },
-            }
-            await ws.send_json(payload)
-    except WebSocketDisconnect:
+            # TODO: publish real aggregated, anonymised order flow here.
+            raise NotImplementedError("No live momentum source is wired up.")
+    except (WebSocketDisconnect, NotImplementedError):
         manager.disconnect(ws)
+
+
+# ─── 6b. Index benchmarks (live) ────────────────────────────────────────────
+
+@app.get("/api/benchmarks", tags=["Analysis"])
+async def index_benchmarks():
+    """Trailing 1-year returns for Nifty 50 / Sensex / Nifty Midcap 150.
+
+    Replaces a hardcoded frontend table whose Nifty figure had the wrong sign.
+    Returns available:false rather than a placeholder when the fetch fails.
+    """
+    return benchmarks.get_benchmarks()
 
 
 # ─── 7. Authentication ──────────────────────────────────────────────────────
