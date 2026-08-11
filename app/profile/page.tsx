@@ -16,7 +16,7 @@ import { AchievementCard } from "@/components/gamification/AchievementCard";
 import { ACHIEVEMENT_DEFINITIONS, getProgressForAchievement } from "@/lib/gamification/achievements";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { DemoBanner } from "@/components/ui/DemoBanner";
-import { user, sips, tribe } from "@/lib/data/mock";
+import { sips } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
 import { cn } from "@/lib/utils/cn";
@@ -29,19 +29,9 @@ function nextStreakMilestone(days: number): number {
   return STREAK_MILESTONES.find((m) => m > days) ?? STREAK_MILESTONES[STREAK_MILESTONES.length - 1];
 }
 
-type RowKey = "tribes" | "sips" | "risk" | "notifications";
-
-const rows: { key: RowKey; icon: LucideIcon; label: string; value: string }[] = [
-  { key: "tribes", icon: Users, label: "Your tribes", value: "1 joined" },
-  { key: "sips", icon: Repeat, label: "SIPs", value: `${sips.length} active` },
-  { key: "risk", icon: ShieldCheck, label: "Risk profile", value: user.riskProfile },
-  { key: "notifications", icon: Bell, label: "Notifications", value: "On" },
-];
-
 export default function ProfilePage() {
   const { analysis: stored, doneFixes, gamification } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
-  const [openSheet, setOpenSheet] = useState<RowKey | null>(null);
 
   // live score — same math as Results: base score + deltas from fixes marked done
   const doneDelta = analysis.flags
@@ -218,83 +208,5 @@ export default function ProfilePage() {
           the user had never entered. Removed rather than mocked. */}
 
     </div>
-  );
-}
-
-function AccountSheet({
-  openKey,
-  onClose,
-  sips: sipList,
-  riskProfile,
-}: {
-  openKey: RowKey | null;
-  onClose: () => void;
-  sips: typeof sips;
-  riskProfile: string;
-}) {
-  const titles: Record<RowKey, string> = {
-    tribes: "Your tribes",
-    sips: "Your SIPs",
-    risk: "Risk profile",
-    notifications: "Notifications",
-  };
-
-  return (
-    <AnimatePresence>
-      {openKey && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 z-[60] bg-black/60"
-          />
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            className="fixed inset-x-0 bottom-0 z-[60] mx-auto w-full max-w-app rounded-t-3xl bg-elevated px-6 pb-8 pt-3"
-          >
-            <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-strong" />
-            <div className="flex items-start justify-between">
-              <h3 className="text-[18px] font-bold text-primary">{titles[openKey]}</h3>
-              <button onClick={onClose} className="-m-1 p-1 text-muted">
-                <X size={20} strokeWidth={2.4} />
-              </button>
-            </div>
-
-            {openKey === "sips" && (
-              <div className="mt-4 space-y-3">
-                {sipList.map((sip) => (
-                  <div key={sip.name} className="rounded-xl bg-surface p-3.5">
-                    <p className="text-[14px] font-semibold text-primary">{sip.name}</p>
-                    <p className="mt-0.5 text-[12px] text-muted">
-                      {formatINR(sip.monthly)}/mo · {sip.months} months · {formatPercent(sip.returnPct)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {openKey === "risk" && (
-              <p className="mt-4 text-[14px] leading-relaxed text-secondary">
-                You&apos;re marked <span className="font-semibold text-gold">{riskProfile}</span>. This
-                shapes which fixes and tips Ants surfaces — aggressive profiles see more upside language,
-                conservative ones see more downside framing.
-              </p>
-            )}
-
-            {openKey === "notifications" && (
-              <p className="mt-4 text-[14px] leading-relaxed text-secondary">
-                Daily check-in reminders and price alert triggers are on. Fine-grained controls are
-                coming — for now it&apos;s all or nothing.
-              </p>
-            )}
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
   );
 }
