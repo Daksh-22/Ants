@@ -83,11 +83,23 @@ def extract_holdings(image_b64: str, media_type: str) -> Optional[list[dict[str,
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
                     {"type": "text", "text": (
-                        "This is a screenshot of an Indian broker/investment app (Groww, Zerodha "
-                        "Kite/Console, Kuvera, INDmoney or similar). Extract every equity/ETF/fund "
-                        "holding you can read: ticker (or fund name as symbol), quantity, and average "
-                        "buy price in ₹. If avg price isn't shown but invested value and qty are, "
-                        "compute avg = invested/qty. Skip totals rows."
+                        "This is a screenshot of an Indian broker/investment app (Growth, Zerodha Kite/Console, Kuvera, INDmoney, ET Money, Shoonya, Angel, 5Paisa, or similar). "
+                        "CAREFULLY extract EVERY equity/ETF/mutual fund holding visible. For each:\n"
+                        "1. TICKER: NSE symbol in UPPERCASE (e.g., TCS, INFY, SBIN, RELIANCE). For mutual funds use the fund's short code.\n"
+                        "2. QUANTITY: Number of shares/units held. Look for columns labeled 'Qty', 'Shares', 'Units', 'Quantity', 'Holdings'.\n"
+                        "3. AVERAGE BUY PRICE: Price per unit in ₹. Look for 'Avg Price', 'Avg Cost', 'Buy Price', 'Cost Price', 'Avg Buy'. "
+                        "If not visible, calculate: Total Invested Value ÷ Quantity = Average Price.\n"
+                        "\n"
+                        "CRITICAL RULES:\n"
+                        "- Skip header rows, footer rows, total rows, and summary rows.\n"
+                        "- Skip rows that show portfolio totals (like 'Total: ₹...', 'Overall P&L', 'Net Value').\n"
+                        "- Only extract positions where all three values (ticker, qty, avg) are present or calculable.\n"
+                        "- If you see duplicate tickers, sum the quantities.\n"
+                        "- Ensure prices are per unit, not total value.\n"
+                        "- For fractional holdings, round to 2 decimal places.\n"
+                        "- If any value is missing or unclear, skip that row entirely.\n"
+                        "\n"
+                        "Return ONLY valid holdings. Better to extract 5 correct holdings than 10 with errors."
                     )},
                 ],
             }],

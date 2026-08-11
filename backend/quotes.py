@@ -127,23 +127,29 @@ def _fetch_one(key: str) -> Quote | None:
     if price is not None and name and sector:
         return Quote(key, name, sector, price, "live")
 
-    # need the network. Try NSE, then BSE.
+    # need the network. Try NSE first (more reliable), then BSE.
     for suffix in (".NS", ".BO"):
         symbol = f"{key}{suffix}"
         try:
-            tk = yf.Ticker(symbol)
+            tk = yf.Ticker(symbol, session=None)
 
             if price is None:
                 try:
-                    p = float(tk.fast_info.last_price)
-                    if p > 0:
-                        price = p
-                        _price_cache[key] = (p, now)
-                except Exception:
-                    price = None
+                    # try fast_info first (most reliable)
+                    p = tk.fast_info.get("lastPrice") or tk.fast_info.get("last_price")
+                    if p is None:
+                        # fallback to regular info
+                        info = tk.info or {}
+                        p = info.get("currentPrice") or info.get("regularMarketPrice")
 
-            # only pay for .info when we still lack a name/sector
-            if price is not None and (not name or not sector):
+                    if p and float(p) > 0:
+                        price = float(p)
+                        _price_cache[key] = (price, now)
+                except (ValueError, TypeError, AttributeError):
+                    pass
+
+            # only fetch .info when we still lack a name/sector
+            if (not name or not sector):
                 try:
                     info = tk.info or {}
                     y_name = (info.get("shortName") or info.get("longName") or "").strip()
@@ -159,6 +165,7 @@ def _fetch_one(key: str) -> Quote | None:
             if price is not None:
                 return Quote(key, name or key, sector or "Other", price, "live")
         except Exception:
+            # yfinance timeout or network issue; try next suffix
             continue
 
     return None
