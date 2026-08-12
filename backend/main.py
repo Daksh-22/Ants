@@ -41,6 +41,7 @@ import rag
 import auth
 import database
 import prices
+import risk as risk_stats
 import ocr_tesseract
 from csv_importer import csv_to_holdings
 
@@ -139,11 +140,64 @@ async def portfolio_metrics(payload: AnalyzeRequest):
         analysis = engine.analyze([p.model_dump() for p in payload.positions], source=payload.source)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    risk = metrics.calculate_metrics(analysis["holdings"], analysis["summary"]["returnsPct"])
-    contributions = metrics.get_holding_volatilities(analysis["holdings"])
+    holdings = analysis["holdings"]
+
+    # Real per-ticker volatility/beta/drawdown from 1y of daily closes. This
+    # replaces a sector -> volatility lookup table in which 10 of the 22 sector
+    # labels the pricing layer emits were missing, so most holdings silently
+    # took a 22.0% default and the whole risk screen barely moved when the
+    # portfolio changed.
+    per_ticker = risk_stats.resolve_risk([h["ticker"] for h in holdings])
+    book = risk_stats.portfolio_risk(holdings, per_ticker)
+
+    if not book.get("available"):
+        # No history for anything we hold — say so instead of inventing a score.
+        return {
+            "risk": None,
+            "holdingVolatilities": [],
+            "note": "Not enough price history to measure risk for these holdings.",
+            "coveragePct": 0.0,
+        }
+
+    vol = book["volatilityPct"]
+    ret = analysis["summary"]["returnsPct"]
+    RISK_FREE_PCT = 6.0  # ~1y Indian government bond
+
+    # Weight-aware worst historical drawdown across the book.
+    dd_num = sum(
+        (float(h.get("weightPct") or 0) / 100) * per_ticker[k].max_drawdown_pct
+        for h in holdings
+        if (k := engine._norm(str(h["ticker"]))) in per_ticker
+    )
+    covered = book["coveragePct"] / 100 or 1.0
+
+    # 0 = punishing, 100 = calm. 12% annualised vol is index-like, 45% is a
+    # single-name speculative book; clamp and invert linearly between them.
+    risk_score = max(0, min(100, round((45 - vol) / (45 - 12) * 100)))
+
     return {
-        "risk": risk.__dict__,
-        "holdingVolatilities": [c.__dict__ for c in contributions],
+        "risk": {
+            "volatility_pct": vol,
+            "sharpe_ratio": round((ret - RISK_FREE_PCT) / vol, 2) if vol > 0 else 0.0,
+            "max_drawdown_pct": round(dd_num / covered, 1),
+            "beta_vs_nifty": book.get("beta"),
+            "risk_score": risk_score,
+        },
+        "holdingVolatilities": [
+            {
+                "ticker": h["ticker"],
+                "sector": h["sector"],
+                "volatility_pct": per_ticker[k].volatility_pct,
+                "contribution_to_portfolio_risk": round(
+                    per_ticker[k].volatility_pct * float(h.get("weightPct") or 0) / 100, 1
+                ),
+            }
+            for h in holdings
+            if (k := engine._norm(str(h["ticker"]))) in per_ticker
+        ],
+        # What share of the book these numbers actually cover — the UI should
+        # hedge rather than imply full coverage on a partially-resolved book.
+        "coveragePct": book["coveragePct"],
     }
 
 

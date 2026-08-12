@@ -175,7 +175,7 @@ export function RiskDashboard({ riskMetrics, holdingVolatilities, index = 0 }: R
                   <div className="min-w-0">
                     <p className="truncate text-[13px] font-medium text-primary">{h.ticker}</p>
                     <p className="text-[11px] text-muted">
-                      {h.sector} · {h.volatility_pct}% sector vol
+                      {h.sector} · {h.volatility_pct}% annual swing
                     </p>
                   </div>
                   <span className="shrink-0 text-[13px] font-bold text-amber tabular">

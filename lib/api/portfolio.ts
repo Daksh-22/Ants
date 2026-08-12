@@ -80,6 +80,42 @@ export async function analyzeBroker(): Promise<Analysis> {
   return ready.analysis;
 }
 
+// ─── Risk metrics (real, from price history) ────────────────────────────────
+
+export interface RiskReply {
+  /** null when no holding had enough price history to measure */
+  risk: {
+    volatility_pct: number;
+    sharpe_ratio: number;
+    max_drawdown_pct: number;
+    beta_vs_nifty: number | null;
+    risk_score: number;
+  } | null;
+  holdingVolatilities: {
+    ticker: string;
+    sector: string;
+    volatility_pct: number;
+    contribution_to_portfolio_risk: number;
+  }[];
+  /** share of portfolio weight these numbers actually cover */
+  coveragePct: number;
+  note?: string;
+}
+
+/**
+ * Real volatility / beta / drawdown, computed server-side from a year of daily
+ * closes. Replaces a client-side sector→volatility lookup whose table was
+ * missing 10 of the 22 sector labels the backend emits, so most holdings took
+ * a 22% default and the risk screen barely moved between portfolios.
+ */
+export function fetchRiskMetrics(positions: RawPosition[]): Promise<RiskReply> {
+  return request<RiskReply>("/api/metrics", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ positions, source: "insights" }),
+  });
+}
+
 // ─── Index benchmarks (live) ────────────────────────────────────────────────
 
 export interface IndexBenchmark {

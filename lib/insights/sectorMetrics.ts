@@ -1,22 +1,11 @@
 import type { AnalysisHolding } from "@/lib/analysis/types";
 import type { SectorMetrics } from "@/lib/insights/types";
 
-// Sector volatility baselines (annualized %) — mirrors backend/metrics.py
-const SECTOR_VOLATILITY: Record<string, number> = {
-  IT: 22.5,
-  Banking: 20.0,
-  "NBFC/Finance": 24.0,
-  Energy: 28.0,
-  Power: 18.5,
-  Electronics: 26.0,
-  Defense: 19.0,
-  Railways: 17.0,
-  Auto: 25.0,
-  FMCG: 16.0,
-  Pharma: 21.0,
-  "Consumer Tech": 35.0,
-  Conglomerate: 23.0,
-};
+// NOTE: a SECTOR_VOLATILITY lookup table used to live here and feed the whole
+// risk dashboard. Ten of the twenty-two sector labels the backend emits were
+// missing from it, so most holdings silently took a 22.0% default and every
+// risk number barely moved between portfolios. Real volatility now comes from
+// GET /api/metrics, computed from a year of daily closes per ticker.
 
 /**
  * Aggregate holdings into per-sector metrics, computed from the live analysis.
@@ -40,7 +29,6 @@ export function computeSectorMetrics(holdings: AnalysisHolding[]): SectorMetrics
     holdings_count: e.count,
     weight_pct: e.weight,
     return_pct: e.invested > 0 ? ((e.value - e.invested) / e.invested) * 100 : 0,
-    volatility_pct: SECTOR_VOLATILITY[sector] ?? 22.0,
   }));
 
   return metrics.sort((a, b) => b.weight_pct - a.weight_pct);

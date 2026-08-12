@@ -25,9 +25,13 @@ interface UploadEmptyStateProps {
 
 /**
  * STATE 1 — onboarding. Three ways in, so account-linking is never a wall:
- *   1. Link your broker (Account Aggregator — real, most accurate) — PRIMARY
- *   2. Upload a screenshot (OCR → editable review, no account needed)
- *   3. Enter positions manually (full control, no account)
+ *   1. Upload a screenshot (OCR → editable review, no account needed)
+ *   2. Enter positions manually (full control, no account)
+ *
+ * Broker linking (Account Aggregator) is deliberately absent — it needs a
+ * licensed aggregator and an RBI FIU registration, and shipping a button that
+ * returned demo data cost more trust than the missing feature does. It comes
+ * back when it actually connects.
  *
  * Screenshots deliberately do NOT go straight to an analysis: OCR is a guess,
  * so the extracted rows land in the manual-entry form for the user to confirm
@@ -128,35 +132,12 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
             onChange={(e) => void handleFile(e.target.files?.[0])}
           />
 
-          {/* Broker linking is NOT built. It used to be the gold hero button and
-              returned the built-in demo portfolio to everyone, presented as their
-              own holdings — the single most misleading thing in the product.
-              Shown as an honest, non-interactive "not yet" so the two paths that
-              actually work get the attention. */}
-          <div className="mt-7 flex w-full items-center gap-3 rounded-2xl border border-dashed border-white/12 px-5 py-4">
-            <Lock size={18} strokeWidth={2.2} className="shrink-0 text-muted" />
-            <div className="min-w-0">
-              <p className="text-[13px] font-bold text-secondary">Link your broker</p>
-              <p className="text-[11px] leading-snug text-muted">
-                Not available yet — it needs a licensed Account Aggregator. Use a
-                screenshot or manual entry below.
-              </p>
-            </div>
-          </div>
-
           {error && (
             <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-dim px-3 py-2.5">
               <AlertCircle size={16} className="shrink-0 text-red" />
               <p className="text-[12px] leading-snug text-red">{error}</p>
             </div>
           )}
-
-          {/* divider */}
-          <div className="my-5 flex items-center gap-3">
-            <span className="h-px flex-1 bg-white/10" />
-            <span className="text-[10px] uppercase tracking-[0.8px] text-muted">or skip the linking</span>
-            <span className="h-px flex-1 bg-white/10" />
-          </div>
 
           {/* SECONDARY — no-account paths */}
           <div className="space-y-2.5">

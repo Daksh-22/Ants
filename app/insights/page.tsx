@@ -16,8 +16,12 @@ import type {
   BenchmarkComparison as BenchmarkComparisonType,
   HoldingVolatility,
 } from "@/lib/insights/types";
-import { computeSectorMetrics } from "@/lib/insights/sectorMetrics";
-import { fetchBenchmarks, type BenchmarksReply } from "@/lib/api/portfolio";
+import {
+  fetchBenchmarks,
+  fetchRiskMetrics,
+  type BenchmarksReply,
+  type RiskReply,
+} from "@/lib/api/portfolio";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { XP_REWARDS } from "@/lib/gamification/xpSystem";
@@ -60,43 +64,42 @@ export default function InsightsPage() {
   const { analysis: stored, hydrated, earnXp } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
-  // risk metrics: sector-volatility model mirrored from backend/metrics.py
-  const { riskMetrics, holdingVolatilities } = useMemo(() => {
-    const sectors = computeSectorMetrics(analysis.holdings);
-
-    // portfolio volatility: weight × sector vol, with a diversification haircut
-    const volSquared = sectors.reduce(
-      (sum, s) => sum + ((s.weight_pct / 100) * s.volatility_pct) ** 2,
-      0
-    );
-    const volatility = Math.sqrt(volSquared) * 0.8 || 18;
-    const sharpe = volatility > 0 ? (analysis.summary.returnsPct - 6) / volatility : 0;
-    const sharpeScore = Math.max(0, Math.min(100, (sharpe + 1) * 33.33));
-    const volScore = Math.max(0, Math.min(100, 100 - (volatility - 10) * 2.5));
-
-    const metrics: RiskMetrics = {
-      volatility_pct: Math.round(volatility * 10) / 10,
-      sharpe_ratio: Math.round(sharpe * 100) / 100,
-      max_drawdown_pct: Math.round(-volatility * 2.5 * 10) / 10,
-      beta_vs_nifty: Math.round(((0.85 * volatility) / 16.5) * 100) / 100,
-      risk_score: Math.round(sharpeScore * 0.6 + volScore * 0.4),
-    };
-
-    const vols: HoldingVolatility[] = analysis.holdings
-      .map((h) => {
-        const sectorVol = sectors.find((s) => s.sector === h.sector)?.volatility_pct ?? 22;
-        return {
-          ticker: h.ticker,
-          sector: h.sector,
-          volatility_pct: sectorVol,
-          contribution_to_portfolio_risk: Math.round((h.weightPct / 100) * sectorVol * 10) / 10,
-        };
+  // Real risk, computed server-side from a year of daily closes. This used to
+  // be a client-side sector→volatility lookup with invented coefficients
+  // (`* 0.8`, `-vol * 2.5`, `0.85 * vol / 16.5`), and its table was missing 10
+  // of the 22 sector labels the backend emits — so most holdings silently took
+  // a 22% default and every number here barely moved between portfolios.
+  const [riskReply, setRiskReply] = useState<RiskReply | null>(null);
+  useEffect(() => {
+    const positions = analysis.holdings.map((h) => ({
+      ticker: h.ticker,
+      qty: h.qty,
+      avg: h.avg,
+    }));
+    if (positions.length === 0) return;
+    let alive = true;
+    fetchRiskMetrics(positions)
+      .then((r) => {
+        if (alive) setRiskReply(r);
       })
-      .sort((a, b) => b.contribution_to_portfolio_risk - a.contribution_to_portfolio_risk);
-
-    return { riskMetrics: metrics, holdingVolatilities: vols };
+      .catch(() => {
+        /* leave null — the risk card hides rather than showing a guess */
+      });
+    return () => {
+      alive = false;
+    };
   }, [analysis]);
 
+  const riskMetrics: RiskMetrics | null = riskReply?.risk
+    ? { ...riskReply.risk, beta_vs_nifty: riskReply.risk.beta_vs_nifty ?? 0 }
+    : null;
+  const holdingVolatilities: HoldingVolatility[] = (riskReply?.holdingVolatilities ?? [])
+    .slice()
+    .sort((a, b) => b.contribution_to_portfolio_risk - a.contribution_to_portfolio_risk);
+
+  // Live index returns. Hidden entirely when unavailable — never replaced with
+  // a placeholder, which is how a hardcoded +8.5% Nifty shipped against an
+  // actual -0.46%.
   const [indexes, setIndexes] = useState<BenchmarksReply["indexes"] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -105,7 +108,7 @@ export default function InsightsPage() {
         if (alive && r.available) setIndexes(r.indexes);
       })
       .catch(() => {
-        /* leave null — the comparison stays hidden rather than showing a guess */
+        /* leave null — the comparison stays hidden */
       });
     return () => {
       alive = false;
@@ -117,23 +120,21 @@ export default function InsightsPage() {
   const benchmarks: BenchmarkComparisonType | null = useMemo(() => {
     if (!indexes) return null;
     const n = indexes.nifty50?.returnPct;
-    const s = indexes.sensex?.returnPct;
+    const sx = indexes.sensex?.returnPct;
     const m = indexes.midCap?.returnPct;
-    if (n === undefined || s === undefined || m === undefined) return null;
+    if (n === undefined || sx === undefined || m === undefined) return null;
     const mine = analysis.summary.returnsPct;
     return {
       user_return_pct: mine,
       nifty50_return_pct: n,
-      sensex_return_pct: s,
+      sensex_return_pct: sx,
       nifty_micro_cap_return_pct: m,
       outperformance: {
         vs_nifty50: mine - n,
-        vs_sensex: mine - s,
+        vs_sensex: mine - sx,
         vs_nifty_micro_cap: mine - m,
       },
-      // No percentile: ranking a user against peers needs a real cohort of
-      // real users. This was pinned at 72 and rendered as a "Top 28%" trophy
-      // for everyone.
+      // Ranking against peers needs a real cohort of real users.
       rank_percentile: null,
     };
   }, [analysis, indexes]);
@@ -216,17 +217,27 @@ export default function InsightsPage() {
           </Reveal>
         </section>
 
-        {/* risk profile */}
-        <section>
-          <Reveal index={3}>
-            <h2 className="mb-3 text-heading text-primary">Risk profile</h2>
-          </Reveal>
-          <RiskDashboard
-            riskMetrics={riskMetrics}
-            holdingVolatilities={holdingVolatilities}
-            index={4}
-          />
-        </section>
+        {/* Risk profile — rendered only once the real numbers land. It used to
+            render immediately off client-side guesses, so the card was always
+            populated and always roughly the same. */}
+        {riskMetrics && (
+          <section>
+            <Reveal index={3}>
+              <h2 className="mb-3 text-heading text-primary">Risk profile</h2>
+              {riskReply && riskReply.coveragePct < 99 && (
+                <p className="-mt-2 mb-3 text-[12px] text-muted">
+                  Based on {Math.round(riskReply.coveragePct)}% of your portfolio
+                  — the rest doesn&apos;t have enough price history yet.
+                </p>
+              )}
+            </Reveal>
+            <RiskDashboard
+              riskMetrics={riskMetrics}
+              holdingVolatilities={holdingVolatilities}
+              index={4}
+            />
+          </section>
+        )}
 
         {/* benchmarks */}
         <section>

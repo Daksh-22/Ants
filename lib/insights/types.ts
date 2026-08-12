@@ -40,9 +40,12 @@ export interface BenchmarkComparison {
 export interface SectorMetrics {
   sector: string;
   holdings_count: number;
-  weight_pct: number; // Portfolio weight %
-  return_pct: number; // Sector's average return
-  volatility_pct: number; // Sector volatility
+  weight_pct: number; // Portfolio weight %, computed from the live analysis
+  return_pct: number; // Money-weighted sector return, computed from holdings
+  // volatility_pct removed: it came from a hardcoded sector table that was
+  // missing most of the sector labels the backend emits, so it resolved to a
+  // 22.0% constant for the majority of holdings. Real per-ticker volatility
+  // now comes from GET /api/metrics (see RiskReply.holdingVolatilities).
 }
 
 export interface WatchlistItem {
