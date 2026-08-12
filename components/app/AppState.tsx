@@ -39,6 +39,8 @@ interface AppState {
   setAnalyzed: (value: boolean) => void;
   setAnalysis: (analysis: Analysis | null, isDemo?: boolean) => void;
   markFixDone: (id: string) => void;
+  /** undo a mis-tapped "mark as done" — the score and card revert with it */
+  unmarkFixDone: (id: string) => void;
   /** daily check-in and streak tracking */
   dailyCheckIn: () => void;
   /** earn XP from various actions */
@@ -145,6 +147,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setDoneFixes((prev) => {
       if (prev.includes(id)) return prev;
       const next = [...prev, id];
+      try {
+        localStorage.setItem(FIXES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  /**
+   * Undo a fix. markFixDone only ever appended, so a mis-tap permanently
+   * inflated the health score, flipped the card teal for good, wrote a point
+   * into the score trend and awarded XP — with the destructive full reset as
+   * the only way back. (The watchlist already offers a 4-second undo for the
+   * far less consequential act of removing a row.)
+   */
+  const unmarkFixDone = (id: string) => {
+    setDoneFixes((prev) => {
+      if (!prev.includes(id)) return prev;
+      const next = prev.filter((f) => f !== id);
       try {
         localStorage.setItem(FIXES_KEY, JSON.stringify(next));
       } catch {
@@ -269,8 +291,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(IS_DEMO_KEY);
       // ants:manual-positions is deliberately kept: it seeds the entry form so
       // a rescan starts from what you already hold instead of two blank rows.
-      // a different portfolio is a different story — the trend restarts
-      localStorage.removeItem("ants:score-history");
+
+      // Everything scoped to the OLD portfolio has to go with it. These were
+      // left behind, so after scanning a different book the user still saw the
+      // previous portfolio's price alerts — rendered as permanent "not in
+      // current portfolio" ghost rows they had to delete one at a time — plus
+      // its watchlist, researched tickers and risk history.
+      for (const key of [
+        "ants:score-history",
+        "ants:risk-score-history",
+        "ants:watchlist",
+        "ants:price-alerts",
+        "ants:researched-tickers",
+        "ants:insights-read-ids",
+      ]) {
+        localStorage.removeItem(key);
+      }
     } catch {
       // ignore
     }
@@ -290,6 +326,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setAnalyzed,
         setAnalysis,
         markFixDone,
+        unmarkFixDone,
         dailyCheckIn,
         earnXp,
         unlockAchievement,

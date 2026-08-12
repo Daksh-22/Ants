@@ -16,6 +16,8 @@ interface FixSheetProps {
   done: boolean;
   onClose: () => void;
   onMarkDone: (id: string) => void;
+  /** undo a mis-tapped completion */
+  onUnmarkDone: (id: string) => void;
 }
 
 const SPARK_COUNT = 10;
@@ -27,7 +29,15 @@ const SPARK_COUNT = 10;
  * counts up live, a gold spark burst fires, and a haptic tick lands — the
  * app's best persuasion asset gets a payoff worth persuading for.
  */
-export function FixSheet({ fix, currentScore, projectedScore, done, onClose, onMarkDone }: FixSheetProps) {
+export function FixSheet({
+  fix,
+  currentScore,
+  projectedScore,
+  done,
+  onClose,
+  onMarkDone,
+  onUnmarkDone,
+}: FixSheetProps) {
   const [celebrating, setCelebrating] = useState(false);
   const liveScore = useCountUp(celebrating ? projectedScore : currentScore, 700);
 
@@ -148,10 +158,22 @@ export function FixSheet({ fix, currentScore, projectedScore, done, onClose, onM
 
           {/* action / celebration */}
           {done ? (
-            <div className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-teal-dim py-3.5 text-[15px] font-bold text-teal">
-              <Check size={17} strokeWidth={3} />
-              Done — nice work
-            </div>
+            <>
+              <div className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-teal-dim py-3.5 text-[15px] font-bold text-teal">
+                <Check size={17} strokeWidth={3} />
+                Done — nice work
+              </div>
+              {/* A mis-tap used to be permanent: the score stayed inflated, the
+                  card stayed teal, and the only way back was the destructive
+                  full reset. */}
+              <button
+                type="button"
+                onClick={() => onUnmarkDone(fix.id)}
+                className="mx-auto mt-2.5 block text-[12px] text-muted underline underline-offset-4 transition-colors hover:text-secondary"
+              >
+                Not actually done — undo
+              </button>
+            </>
           ) : celebrating ? (
             <div className="relative mt-5 flex items-center justify-center gap-2 rounded-xl bg-teal-dim py-3.5 text-[15px] font-bold text-teal">
               <SparkBurst />

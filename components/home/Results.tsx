@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowRight, Check, PenLine, RotateCcw } from "lucide-react";
@@ -112,6 +113,7 @@ export function Results() {
     isDemo,
     doneFixes,
     markFixDone,
+    unmarkFixDone,
     reset,
     earnXp,
     gamification,
@@ -120,6 +122,17 @@ export function Results() {
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   const [openFixId, setOpenFixId] = useState<string | null>(null);
+
+  // ?fix=<id> opens that fix directly, so "Fix it on Home" from /portfolio
+  // lands on the sheet instead of the top of the page.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  useEffect(() => {
+    const wanted = searchParams.get("fix");
+    if (!wanted) return;
+    setOpenFixId(wanted);
+    router.replace("/home");
+  }, [searchParams, router]);
   const [pulse, setPulse] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -459,6 +472,7 @@ export function Results() {
             projectedScore={projected}
             done={doneFixes.includes(openFix.id)}
             onClose={() => setOpenFixId(null)}
+            onUnmarkDone={unmarkFixDone}
             onMarkDone={(id) => {
               markFixDone(id);
               earnXp(XP_REWARDS.FIX_COMPLETED, "Fix completed");

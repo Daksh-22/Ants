@@ -166,7 +166,10 @@ export default function PortfolioPage() {
                     ) : (
                       flag.fix && (
                         <Link
-                          href="/home"
+                          // deep-link straight to this fix — the plain /home
+                          // link dropped the user at the top of a long page to
+                          // hunt for the flag they had just tapped
+                          href={`/home?fix=${encodeURIComponent(flag.fix.id)}`}
                           className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-gold"
                         >
                           Fix it on Home
