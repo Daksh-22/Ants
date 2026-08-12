@@ -28,9 +28,9 @@ interface UploadEmptyStateProps {
 }
 
 /**
- * STATE 1 — onboarding. Three ways in, so account-linking is never a wall:
- *   1. Upload a screenshot (OCR → editable review, no account needed)
- *   2. Enter positions manually (full control, no account)
+ * STATE 1 — onboarding. Two ways in, neither of which needs an account:
+ *   1. Upload a screenshot (OCR → editable review)
+ *   2. Enter positions manually (full control)
  *
  * Broker linking (Account Aggregator) is deliberately absent — it needs a
  * licensed aggregator and an RBI FIU registration, and shipping a button that
@@ -96,6 +96,11 @@ export function UploadEmptyState({
           ? `Read ${result.holdings.length} holding${result.holdings.length > 1 ? "s" : ""} with free OCR — check the numbers against your app before analyzing.`
           : `Read ${result.holdings.length} holding${result.holdings.length > 1 ? "s" : ""} from your screenshot. Fix anything that looks off.`
       );
+      try {
+        localStorage.setItem(SAVED_POSITIONS_KEY, JSON.stringify(result.holdings));
+      } catch {
+        // ignore persistence failures — the in-memory rows still work
+      }
       setView("review");
     } catch {
       setError("Couldn't reach the screenshot reader right now — try manual entry instead.");
@@ -117,6 +122,10 @@ export function UploadEmptyState({
     }
     onStart(() => analyzePositions(parsed));
   };
+
+  // Once a screenshot has been read, offer the way back into those rows so a
+  // stray Back tap doesn't cost another upload + OCR round trip.
+  const hasSavedRows = readSavedPositions().length > 0;
 
   if (view === "manual") {
     // These rows were written to localStorage on every submit and never read
@@ -220,8 +229,14 @@ export function UploadEmptyState({
             >
               <PenLine size={20} strokeWidth={2.2} className="shrink-0 text-gold" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px] font-semibold text-primary">Enter positions manually</span>
-                <span className="block text-[12px] text-muted">Type in what you hold — no account needed</span>
+                <span className="block text-[15px] font-semibold text-primary">
+                  {hasSavedRows ? "Continue where you left off" : "Enter positions manually"}
+                </span>
+                <span className="block text-[12px] text-muted">
+                  {hasSavedRows
+                    ? "Your rows are still here — pick up and analyze"
+                    : "Type in what you hold — no account needed"}
+                </span>
               </span>
               <ChevronRight
                 size={18}
