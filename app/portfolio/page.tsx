@@ -22,8 +22,26 @@ import { cn } from "@/lib/utils/cn";
  * screenshot / broker, falling back to the built-in demo. Holdings, P&L and
  * the audit all come off the analysis object; nothing here is invented.
  */
+
+/**
+ * AppState reads localStorage in an effect, so the first paint always used
+ * DEFAULT_ANALYSIS — every visit flashed a stranger's ₹1,04,019 portfolio,
+ * demo holdings and the "Sample portfolio" banner before swapping to the real
+ * numbers. /insights and /home already gated on `hydrated`; these two didn't.
+ */
+function PageSkeleton() {
+  return (
+    <div className="space-y-3 px-5 pt-7">
+      <div className="h-7 w-40 animate-pulse rounded-lg bg-surface" />
+      <div className="h-24 animate-pulse rounded-2xl bg-surface" />
+      <div className="h-16 animate-pulse rounded-2xl bg-surface" />
+      <div className="h-16 animate-pulse rounded-2xl bg-surface" />
+    </div>
+  );
+}
+
 export default function PortfolioPage() {
-  const { analysis: stored, doneFixes } = useAppState();
+  const { analysis: stored, doneFixes, hydrated } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   // adapt analysis holdings (already winners-first) to the HoldingRow shape.
@@ -46,6 +64,8 @@ export default function PortfolioPage() {
   }, [analysis]);
 
   const flagCount = analysis.flags.length;
+
+  if (!hydrated) return <PageSkeleton />;
 
   return (
     <div className="px-5 pt-7">

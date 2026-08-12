@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, Check, RotateCcw } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, PenLine, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
@@ -121,6 +121,21 @@ export function Results() {
   const [pulse, setPulse] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // True only for the very first results render of a session, so the daily
+  // check-in sheet doesn't land on top of the answer the user just waited for.
+  const [isFirstResult] = useState(() => {
+    try {
+      const seen = localStorage.getItem("ants:seen-results");
+      if (!seen) {
+        localStorage.setItem("ants:seen-results", "1");
+        return true;
+      }
+    } catch {
+      // localStorage unavailable — treat as a returning user
+    }
+    return false;
+  });
+
   const fixesById = useMemo(() => {
     const map = new Map<string, FixPlan>();
     for (const f of analysis.flags) if (f.fix) map.set(f.fix.id, f.fix);
@@ -182,7 +197,12 @@ export function Results() {
   return (
     <div>
       <Header />
-      <DailyCheckInPrompt />
+      {/* Suppressed on the first-ever result. lastCheckInDate seeds to the
+          epoch, so this prompt was always "due" for a new user: they sat
+          through the processing script, the results faded in, and a
+          full-screen sheet immediately slid over them asking about a streak
+          they didn't have yet. */}
+      {!isFirstResult && <DailyCheckInPrompt />}
 
       {isDemo && (
         <div className="mx-5 mt-4 flex items-center gap-2.5 rounded-xl bg-amber-dim px-3.5 py-2.5">
@@ -383,21 +403,17 @@ export function Results() {
           </Reveal>
         )}
 
-        {/* the one community door — not a feed */}
+        {/* Edit is the common case — correcting a quantity shouldn't cost the
+            whole portfolio and the score trend. Kept visually distinct from
+            the destructive reset below it. */}
         <Reveal index={13}>
-          <Card className="border-l-[3px] border-purple">
-            <p className="text-[14px] leading-[1.5] text-secondary">
-              <span className="font-semibold text-primary">Tribes are coming</span> — compare notes
-              with investors on the same thesis, not influencers with a course to sell.
-            </p>
-            <Link
-              href="/tribes"
-              className="mt-3 inline-flex items-center gap-1 text-[14px] font-semibold text-gold"
-            >
-              Peek at the tribes
-              <ArrowRight size={14} strokeWidth={2.6} />
-            </Link>
-          </Card>
+          <Link
+            href="/home?edit=1"
+            className="mx-auto mb-3 flex w-fit items-center gap-1.5 rounded-full bg-surface px-4 py-2 text-[13px] font-semibold text-secondary transition-colors hover:bg-elevated"
+          >
+            <PenLine size={13} strokeWidth={2.5} />
+            Edit my holdings
+          </Link>
         </Reveal>
 
         {/* replay / analyze a fresh portfolio — two-tap so progress is never lost by accident */}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, RotateCw, PenLine } from "lucide-react";
 import { useAppState } from "@/components/app/AppState";
 import { UploadEmptyState } from "@/components/home/UploadEmptyState";
@@ -25,7 +26,28 @@ import type { Analysis } from "@/lib/analysis/types";
  * surface as failures, and the retry re-runs the same request.
  */
 export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomeRoute />
+    </Suspense>
+  );
+}
+
+function HomeRoute() {
   const { analyzed, hydrated, setAnalyzed, setAnalysis } = useAppState();
+  const router = useRouter();
+  const params = useSearchParams();
+
+  // ?edit=1 drops the user back into the entry form with their existing rows
+  // restored, instead of forcing a destructive reset + full retype to fix one
+  // quantity. Consumed once so a refresh doesn't strand them in edit mode.
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (params.get("edit") === "1") {
+      setEditing(true);
+      router.replace("/home");
+    }
+  }, [params, router]);
   const [processing, setProcessing] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const resultRef = useRef<Analysis | null>(null);
@@ -100,11 +122,20 @@ export default function HomePage() {
     );
   }
 
-  if (analyzed) {
+  if (analyzed && !editing) {
     return <Results />;
   }
 
-  return <UploadEmptyState onStart={start} />;
+  return (
+    <UploadEmptyState
+      onStart={(f) => {
+        setEditing(false);
+        start(f);
+      }}
+      startInManualEntry={editing}
+      onExitEdit={editing ? () => setEditing(false) : undefined}
+    />
+  );
 }
 
 /**

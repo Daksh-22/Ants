@@ -29,8 +29,26 @@ function nextStreakMilestone(days: number): number {
   return STREAK_MILESTONES.find((m) => m > days) ?? STREAK_MILESTONES[STREAK_MILESTONES.length - 1];
 }
 
+
+/**
+ * AppState reads localStorage in an effect, so the first paint always used
+ * DEFAULT_ANALYSIS — every visit flashed a stranger's ₹1,04,019 portfolio,
+ * demo holdings and the "Sample portfolio" banner before swapping to the real
+ * numbers. /insights and /home already gated on `hydrated`; these two didn't.
+ */
+function PageSkeleton() {
+  return (
+    <div className="space-y-3 px-5 pt-7">
+      <div className="h-7 w-40 animate-pulse rounded-lg bg-surface" />
+      <div className="h-24 animate-pulse rounded-2xl bg-surface" />
+      <div className="h-16 animate-pulse rounded-2xl bg-surface" />
+      <div className="h-16 animate-pulse rounded-2xl bg-surface" />
+    </div>
+  );
+}
+
 export default function ProfilePage() {
-  const { analysis: stored, doneFixes, gamification } = useAppState();
+  const { analysis: stored, doneFixes, gamification, hydrated } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   // live score — same math as Results: base score + deltas from fixes marked done
@@ -64,6 +82,8 @@ export default function ProfilePage() {
     },
     { label: "Health score", value: `${score}/100`, className: "text-gold" },
   ];
+
+  if (!hydrated) return <PageSkeleton />;
 
   return (
     <div className="px-5 pt-7">

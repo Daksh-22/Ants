@@ -21,6 +21,10 @@ const teasers = [
 interface UploadEmptyStateProps {
   /** hand over a fetcher; the home state machine runs it during Processing */
   onStart: (fetcher: () => Promise<Analysis>) => void;
+  /** open straight into the entry form, pre-filled — the "edit holdings" path */
+  startInManualEntry?: boolean;
+  /** present only while editing: returns to the existing results */
+  onExitEdit?: () => void;
 }
 
 /**
@@ -59,8 +63,14 @@ function readSavedPositions(): RawPosition[] {
   }
 }
 
-export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
-  const [view, setView] = useState<"choose" | "manual" | "review">("choose");
+export function UploadEmptyState({
+  onStart,
+  startInManualEntry = false,
+  onExitEdit,
+}: UploadEmptyStateProps) {
+  const [view, setView] = useState<"choose" | "manual" | "review">(
+    startInManualEntry ? "manual" : "choose"
+  );
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [extracted, setExtracted] = useState<RawPosition[]>([]);
@@ -115,7 +125,9 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
     const saved = readSavedPositions();
     return (
       <ManualEntry
-        onBack={() => setView("choose")}
+        // While editing, Back returns to the results the user came from
+        // rather than dumping them on the empty state.
+        onBack={onExitEdit ?? (() => setView("choose"))}
         onSubmit={handleManualSubmit}
         initialPositions={saved.length > 0 ? saved : undefined}
       />

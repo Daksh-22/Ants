@@ -111,7 +111,7 @@ export function DailyCheckInPrompt() {
 
                 {gamification.dailyStreak.current > 0 && (
                   <p className="mt-3 text-[12px] font-medium text-red">
-                    Skip today and your {gamification.dailyStreak.current}-day streak resets to zero.
+                    Miss two days running and your {gamification.dailyStreak.current}-day streak resets.
                   </p>
                 )}
 
