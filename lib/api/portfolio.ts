@@ -14,13 +14,40 @@ export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
-  if (!res.ok) {
-    const detail = await res.json().then((b) => b?.detail).catch(() => null);
-    throw new Error(detail || `${res.status} on ${path}`);
+/**
+ * Free-tier hosting spins the backend down when idle, so the first request
+ * after a quiet period pays a cold start. Without a ceiling, a hung socket
+ * left the Processing screen waiting forever with no cancel and no back.
+ */
+const DEFAULT_TIMEOUT_MS = 45_000;
+
+export class ApiTimeoutError extends Error {
+  constructor() {
+    super("The server is taking too long to respond.");
+    this.name = "ApiTimeoutError";
   }
-  return res.json();
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
+    if (!res.ok) {
+      const detail = await res.json().then((b) => b?.detail).catch(() => null);
+      throw new Error(detail || `${res.status} on ${path}`);
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw new ApiTimeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── Analysis ────────────────────────────────────────────────────────────────

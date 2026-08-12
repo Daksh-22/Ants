@@ -18,6 +18,8 @@ interface ProcessingProps {
   onDone: () => void;
   /** resolves when the real analysis is ready — the last step waits for it */
   waitFor?: Promise<unknown>;
+  /** shown as an escape hatch once the wait becomes noticeable */
+  onCancel?: () => void;
 }
 
 /**
@@ -26,7 +28,7 @@ interface ProcessingProps {
  * real `waitFor` promise resolves. If the backend is slow, the user watches a
  * spinner with copy, never a blank black screen.
  */
-export function Processing({ onDone, waitFor }: ProcessingProps) {
+export function Processing({ onDone, waitFor, onCancel }: ProcessingProps) {
   const [visible, setVisible] = useState(0); // how many steps have appeared
   const [checked, setChecked] = useState(0); // how many steps are checked
   const [ready, setReady] = useState(!waitFor);
@@ -34,6 +36,10 @@ export function Processing({ onDone, waitFor }: ProcessingProps) {
   const [tease, setTease] = useState(false);
   const doneRef = useRef(false);
   const advancedRef = useRef(false);
+  // Seconds waited. Free-tier hosting spins the backend down when idle, so a
+  // first request can genuinely take ~50s. Previously the only acknowledgement
+  // of that was a 12px "taking a moment…" and there was no way out at all.
+  const [elapsed, setElapsed] = useState(0);
 
   // scripted reveal of the first three steps
   useEffect(() => {
@@ -54,6 +60,12 @@ export function Processing({ onDone, waitFor }: ProcessingProps) {
     if (!waitFor) return;
     waitFor.finally(() => setReady(true)).catch(() => setReady(true));
   }, [waitFor]);
+
+  useEffect(() => {
+    if (ready) return;
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [ready]);
 
   // step 4 only checks off once BOTH the script has caught up AND data is
   // ready. Guarded by a ref (not `checked` itself) — putting `checked` in the
@@ -125,12 +137,35 @@ export function Processing({ onDone, waitFor }: ProcessingProps) {
                 </span>
                 <span className="text-[16px] font-medium text-primary">{label}</span>
                 {spinningOnData && (
-                  <span className="text-[12px] text-muted">taking a moment…</span>
+                  <span className="text-[12px] text-muted">
+                    {elapsed >= 8 ? `${elapsed}s` : "taking a moment…"}
+                  </span>
                 )}
               </motion.li>
             );
           })}
         </ul>
+
+        {/* After ~8s, name the real cause and offer a way out. A silent
+            indefinite wait with no cancel is the most common abandonment
+            point on a cold-started backend. */}
+        {!ready && elapsed >= 8 && (
+          <div className="mt-8 text-center">
+            <p className="mx-auto max-w-[19rem] text-[13px] leading-relaxed text-secondary">
+              The server was asleep and is waking up. First load can take up to a
+              minute — after that it&apos;s instant.
+            </p>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="mt-4 text-[13px] font-semibold text-muted underline underline-offset-4 transition-colors hover:text-secondary"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         {tease && (
           <motion.p

@@ -38,6 +38,27 @@ interface UploadEmptyStateProps {
  * or correct first. That way an imperfect read still produces a real,
  * personal analysis instead of silently showing demo numbers.
  */
+const SAVED_POSITIONS_KEY = "ants:manual-positions";
+
+/** Last submitted positions, so the form can restore instead of starting blank. */
+function readSavedPositions(): RawPosition[] {
+  try {
+    const raw = localStorage.getItem(SAVED_POSITIONS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is RawPosition =>
+        !!p &&
+        typeof (p as RawPosition).ticker === "string" &&
+        Number((p as RawPosition).qty) > 0 &&
+        Number((p as RawPosition).avg) > 0
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
   const [view, setView] = useState<"choose" | "manual" | "review">("choose");
   const [reading, setReading] = useState(false);
@@ -80,7 +101,7 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
       .map((p) => ({ ticker: p.ticker.trim(), qty: Number(p.qty), avg: Number(p.avg) }))
       .filter((p) => p.ticker && p.qty > 0 && p.avg > 0);
     try {
-      localStorage.setItem("ants:manual-positions", JSON.stringify(parsed));
+      localStorage.setItem(SAVED_POSITIONS_KEY, JSON.stringify(parsed));
     } catch {
       // ignore persistence failures
     }
@@ -88,7 +109,17 @@ export function UploadEmptyState({ onStart }: UploadEmptyStateProps) {
   };
 
   if (view === "manual") {
-    return <ManualEntry onBack={() => setView("choose")} onSubmit={handleManualSubmit} />;
+    // These rows were written to localStorage on every submit and never read
+    // back, so a failed analysis or a stray Back tap meant retyping the whole
+    // portfolio. Restore them.
+    const saved = readSavedPositions();
+    return (
+      <ManualEntry
+        onBack={() => setView("choose")}
+        onSubmit={handleManualSubmit}
+        initialPositions={saved.length > 0 ? saved : undefined}
+      />
+    );
   }
 
   if (view === "review") {

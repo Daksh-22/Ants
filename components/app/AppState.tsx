@@ -267,7 +267,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(FIXES_KEY);
       localStorage.removeItem(ANALYSIS_KEY);
       localStorage.removeItem(IS_DEMO_KEY);
-      localStorage.removeItem("ants:manual-positions");
+      // ants:manual-positions is deliberately kept: it seeds the entry form so
+      // a rescan starts from what you already hold instead of two blank rows.
       // a different portfolio is a different story — the trend restarts
       localStorage.removeItem("ants:score-history");
     } catch {

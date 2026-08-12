@@ -32,6 +32,21 @@ const newId = () =>
 
 const emptyRow = (): ManualPosition => ({ id: newId(), ticker: "", qty: "", avg: "" });
 
+/**
+ * Digits with at most one decimal point.
+ *
+ * Quantity used to strip "." entirely, which made every mutual-fund unit,
+ * fractional ETF and SIP holding un-enterable — "12.345" became "12345".
+ * Price allowed unlimited dots, so "12.3.4" passed the filter, became NaN, and
+ * the row silently failed the completeness check while the error copy blamed a
+ * missing quantity.
+ */
+const sanitizeDecimal = (raw: string): string => {
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  const [head, ...rest] = cleaned.split(".");
+  return rest.length > 0 ? `${head}.${rest.join("")}` : head;
+};
+
 const inputCls =
   "w-full rounded-xl border border-subtle bg-surface px-3 py-2.5 text-[15px] text-primary outline-none transition-colors placeholder:text-muted focus:border-strong focus:ring-1 focus:ring-gold";
 
@@ -131,13 +146,15 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
 
   const complete = rows.filter(isRowComplete);
   const incomplete = rows.filter((r) => isRowTouched(r) && !isRowComplete(r));
-  const canSubmit = complete.length > 0;
+  // A started-but-unfinished row must block submission, not be discarded.
+  const canSubmit = complete.length > 0 && incomplete.length === 0;
 
   const total = complete.reduce((sum, r) => sum + Number(r.qty) * Number(r.avg), 0);
   const liveTotal = useCountUp(total, 500);
 
   const handleSubmit = () => {
     if (!canSubmit) {
+      // surfaces the red borders + the "needs a quantity and price" message
       setTriedSubmit(true);
       return;
     }
@@ -207,15 +224,15 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
                   />
                   <input
                     value={row.qty}
-                    onChange={(e) => update(row.id, "qty", e.target.value.replace(/[^0-9]/g, ""))}
-                    inputMode="numeric"
+                    onChange={(e) => update(row.id, "qty", sanitizeDecimal(e.target.value))}
+                    inputMode="decimal"
                     placeholder="0"
                     aria-label="Quantity"
                     className={cn(inputCls, "text-right tabular", flagged && "border-red focus:ring-red")}
                   />
                   <input
                     value={row.avg}
-                    onChange={(e) => update(row.id, "avg", e.target.value.replace(/[^0-9.]/g, ""))}
+                    onChange={(e) => update(row.id, "avg", sanitizeDecimal(e.target.value))}
                     inputMode="decimal"
                     placeholder="0"
                     aria-label="Average buy price"
