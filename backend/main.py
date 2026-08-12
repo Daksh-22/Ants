@@ -201,6 +201,44 @@ async def portfolio_metrics(payload: AnalyzeRequest):
     }
 
 
+class ResolveRequest(BaseModel):
+    tickers: List[str] = Field(..., max_length=50)
+
+
+@app.post("/api/resolve", tags=["Analysis"])
+async def resolve_tickers(payload: ResolveRequest):
+    """Validate tickers before analysis: which resolve, to what, at what price.
+
+    Without this, a typo silently became a holding — an unresolvable symbol
+    falls back to the user's own average price, which reads as a real position
+    sitting at exactly 0.0%. The entry form uses this to confirm each symbol
+    while the user types, so bad data is caught before it reaches the analysis
+    rather than quietly diluting it.
+    """
+    import quotes as quotes_mod
+
+    cleaned = [t for t in (str(x).strip() for x in payload.tickers) if t][:50]
+    if not cleaned:
+        return {"results": []}
+
+    resolved = quotes_mod.resolve_quotes(cleaned, {})
+    out = []
+    for raw in cleaned:
+        key = engine._norm(raw)
+        q = resolved.get(key)
+        priced = bool(q and q.source in ("live", "reference") and q.price > 0)
+        out.append({
+            "input": raw,
+            "ticker": key,
+            "found": priced,
+            "name": q.name if priced else None,
+            "sector": q.sector if priced else None,
+            "cmp": round(q.price, 2) if priced else None,
+            "priceSource": q.source if q else "unpriced",
+        })
+    return {"results": out}
+
+
 class CheckRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=40)
     positions: List[Position]

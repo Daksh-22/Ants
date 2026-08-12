@@ -74,7 +74,16 @@ def _score_label(score: int) -> str:
 
 
 def _norm(ticker: str) -> str:
-    return "".join(ch for ch in ticker.upper().strip() if ch.isalnum() or ch == "&")
+    """Normalise user input to an NSE-style symbol.
+
+    Hyphens are preserved: several real NSE symbols contain one (BAJAJ-AUTO,
+    M&M-FIN, L&T-FH). Stripping them turned BAJAJ-AUTO into BAJAJAUTO, which
+    resolves to nothing, so the position silently priced at the user's own
+    average. Spaces and everything else still go.
+    """
+    return "".join(
+        ch for ch in ticker.upper().strip() if ch.isalnum() or ch in "&-"
+    ).strip("-")
 
 
 def price_position(
@@ -96,6 +105,10 @@ def price_position(
         price_source = "reference" if key in KNOWN_STOCKS else "unpriced"
 
     if cmp_ <= 0:
+        # No usable price. Fall back to the user's own average so the position
+        # doesn't value at zero and wreck the portfolio total — but keep it
+        # clearly marked "unpriced". A 0% return here means "we don't know",
+        # not "flat", and the UI must not present it as a measured result.
         cmp_ = avg
         price_source = "unpriced"
 
