@@ -45,7 +45,7 @@ function PageSkeleton() {
 }
 
 export default function ProfilePage() {
-  const { analysis: stored, doneFixes, gamification, hydrated } = useAppState();
+  const { analysis: stored, doneFixes, gamification, hydrated, isDemo } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   // live score — same math as Results: base score + deltas from fixes marked done
@@ -66,7 +66,6 @@ export default function ProfilePage() {
     }
   }, []);
 
-  const isDemo = analysis.source === "demo";
   const streak = gamification.dailyStreak.current;
   const milestone = nextStreakMilestone(streak);
 
@@ -80,11 +79,16 @@ export default function ProfilePage() {
     { label: "Health score", value: `${score}/100`, className: "text-gold" },
   ];
 
+  // One source of truth for "this isn't the user's data": either AppState
+  // flagged it, or the analysis itself says so. These were separate checks on
+  // separate pages and could disagree.
+  const isDemoView = isDemo || analysis.source === "demo";
+
   if (!hydrated) return <PageSkeleton />;
 
   return (
     <div className="px-5 pt-7">
-      {isDemo && <DemoBanner className="mb-4" />}
+      {isDemoView && <DemoBanner className="mb-4" />}
 
       {/* identity */}
       <Reveal>
@@ -105,7 +109,7 @@ export default function ProfilePage() {
 
       {/* hero — SIP streak in demo mode, truth checks on a real portfolio */}
       <Reveal index={1} className="mt-6">
-        {isDemo ? (
+        {isDemoView ? (
           <Card className="border-l-2 border-gold bg-gold-dim">
             <SectionLabel>Investing streak</SectionLabel>
             <div className="mt-1.5 flex items-baseline gap-2">

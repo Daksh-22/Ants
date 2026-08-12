@@ -41,7 +41,7 @@ function PageSkeleton() {
 }
 
 export default function PortfolioPage() {
-  const { analysis: stored, doneFixes, hydrated } = useAppState();
+  const { analysis: stored, doneFixes, hydrated, isDemo } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   // adapt analysis holdings (already winners-first) to the HoldingRow shape.
@@ -65,13 +65,18 @@ export default function PortfolioPage() {
 
   const flagCount = analysis.flags.length;
 
+  // One source of truth for "this isn't the user's data": either AppState
+  // flagged it, or the analysis itself says so. These were separate checks on
+  // separate pages and could disagree.
+  const isDemoView = isDemo || analysis.source === "demo";
+
   if (!hydrated) return <PageSkeleton />;
 
   return (
     <div className="px-5 pt-7">
       {/* The hero P&L below renders the sample portfolio when the user has no
           analysis of their own. Say so — it read as their money before. */}
-      {analysis.source === "demo" && <DemoBanner className="mb-4" />}
+      {isDemoView && <DemoBanner className="mb-4" />}
 
       {/* ───── Page title ───── */}
       <Reveal>

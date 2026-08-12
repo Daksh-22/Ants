@@ -31,6 +31,7 @@ import type { AnalysisFlag, FixPlan } from "@/lib/analysis/types";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
 import { cn } from "@/lib/utils/cn";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 import { describeFreshness } from "@/lib/utils/freshness";
 
 type Tone = "red" | "amber" | "teal";
@@ -205,17 +206,7 @@ export function Results() {
           they didn't have yet. */}
       {!isFirstResult && <DailyCheckInPrompt />}
 
-      {isDemo && (
-        <div className="mx-5 mt-4 flex items-center gap-2.5 rounded-xl bg-amber-dim px-3.5 py-2.5">
-          <AlertTriangle size={16} className="shrink-0 text-amber" />
-          <p className="min-w-0 flex-1 text-[12px] leading-snug text-amber">
-            Showing a demo portfolio — we couldn&apos;t reach your data.
-          </p>
-          <button onClick={reset} className="shrink-0 text-[12px] font-bold text-amber underline underline-offset-2">
-            Retry
-          </button>
-        </div>
-      )}
+      {isDemo && <DemoBanner className="mx-5 mt-4" />}
 
       {/* portfolio strip — floats on the base, no container */}
       <Reveal className="px-5 pb-6 pt-7">

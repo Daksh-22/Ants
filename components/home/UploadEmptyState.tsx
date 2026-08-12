@@ -182,8 +182,8 @@ export function UploadEmptyState({
             </div>
           )}
 
-          {/* SECONDARY — no-account paths */}
-          <div className="space-y-2.5">
+          {/* the two ways in */}
+          <div className="mt-7 space-y-2.5">
             <motion.button
               type="button"
               whileTap={{ scale: 0.97 }}
@@ -240,13 +240,14 @@ export function UploadEmptyState({
 
           {/* locked teasers — a sliver of the prize behind each lock */}
           <div className="mt-7 space-y-2.5">
+            {/* Previews of what an analysis surfaces. These used to be
+                buttons wired to fileRef.click(), so tapping "Unlock" — which
+                reads as "explain this to me" — threw up the OS camera/gallery
+                sheet with no warning, from the app's most curiosity-driven
+                control. They're now inert; the two real CTAs sit above. */}
             {teasers.map((t) => (
-              <motion.button
+              <div
                 key={t.label}
-                type="button"
-                whileTap={{ x: [0, -3, 3, -2, 0] }}
-                transition={{ duration: 0.3 }}
-                onClick={() => fileRef.current?.click()}
                 className="flex h-14 w-full items-center justify-between rounded-2xl border border-subtle bg-surface px-4 text-left"
               >
                 <span className="min-w-0">
@@ -255,11 +256,11 @@ export function UploadEmptyState({
                     {t.stat}
                   </span>
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-gold">
-                  <Lock size={14} />
-                  Unlock
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-muted">
+                  <Lock size={13} />
+                  Locked
                 </span>
-              </motion.button>
+              </div>
             ))}
           </div>
         </motion.div>

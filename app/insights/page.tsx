@@ -37,6 +37,22 @@ const INSIGHTS_VISIT_KEY = "ants:insights-last-visit";
 // year was negative. When the fetch fails we hide the comparison rather than
 // fall back to a number we made up.
 
+/** Inline "this section couldn't load" with a retry, instead of a bare heading. */
+function SectionError({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-subtle bg-surface px-4 py-3.5">
+      <p className="text-[13px] leading-snug text-muted">{label}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 text-[13px] font-semibold text-gold underline underline-offset-4"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function InsightsSkeleton() {
   return (
     <div>
@@ -61,7 +77,7 @@ function InsightsSkeleton() {
  * First visit each day earns XP — exploring your own risk is a habit worth paying.
  */
 export default function InsightsPage() {
-  const { analysis: stored, hydrated, earnXp } = useAppState();
+  const { analysis: stored, hydrated, earnXp, isDemo } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
 
   // Real risk, computed server-side from a year of daily closes. This used to
@@ -70,6 +86,10 @@ export default function InsightsPage() {
   // of the 22 sector labels the backend emits — so most holdings silently took
   // a 22% default and every number here barely moved between portfolios.
   const [riskReply, setRiskReply] = useState<RiskReply | null>(null);
+  const [riskFailed, setRiskFailed] = useState(false);
+  const [benchFailed, setBenchFailed] = useState(false);
+  // bumped to re-run both fetches from the inline Retry rows
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     const positions = analysis.holdings.map((h) => ({
       ticker: h.ticker,
@@ -78,17 +98,20 @@ export default function InsightsPage() {
     }));
     if (positions.length === 0) return;
     let alive = true;
+    setRiskFailed(false);
     fetchRiskMetrics(positions)
       .then((r) => {
         if (alive) setRiskReply(r);
       })
       .catch(() => {
-        /* leave null — the risk card hides rather than showing a guess */
+        // Never substitute a guess — but don't collapse to a bare heading
+        // either. The section renders an explicit "couldn't load / Retry".
+        if (alive) setRiskFailed(true);
       });
     return () => {
       alive = false;
     };
-  }, [analysis]);
+  }, [analysis, reloadKey]);
 
   const riskMetrics: RiskMetrics | null = riskReply?.risk
     ? { ...riskReply.risk, beta_vs_nifty: riskReply.risk.beta_vs_nifty ?? 0 }
@@ -103,17 +126,21 @@ export default function InsightsPage() {
   const [indexes, setIndexes] = useState<BenchmarksReply["indexes"] | null>(null);
   useEffect(() => {
     let alive = true;
+    setBenchFailed(false);
     fetchBenchmarks()
       .then((r) => {
-        if (alive && r.available) setIndexes(r.indexes);
+        if (alive) {
+          if (r.available) setIndexes(r.indexes);
+          else setBenchFailed(true);
+        }
       })
       .catch(() => {
-        /* leave null — the comparison stays hidden */
+        if (alive) setBenchFailed(true);
       });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const nifty = indexes?.nifty50?.returnPct ?? null;
 
@@ -154,6 +181,11 @@ export default function InsightsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated]);
 
+  // One source of truth for "this isn't the user's data": either AppState
+  // flagged it, or the analysis itself says so. These were separate checks on
+  // separate pages and could disagree.
+  const isDemoView = isDemo || analysis.source === "demo";
+
   if (!hydrated) return <InsightsSkeleton />;
 
   // null until the live index fetch lands (or forever, if it fails)
@@ -163,7 +195,7 @@ export default function InsightsPage() {
     <div>
       <Header />
 
-      {analysis.source === "demo" && (
+      {isDemoView && (
         <div className="px-5 pt-5">
           <DemoBanner />
         </div>
@@ -220,7 +252,7 @@ export default function InsightsPage() {
         {/* Risk profile — rendered only once the real numbers land. It used to
             render immediately off client-side guesses, so the card was always
             populated and always roughly the same. */}
-        {riskMetrics && (
+        {(riskMetrics || riskFailed) && (
           <section>
             <Reveal index={3}>
               <h2 className="mb-3 text-heading text-primary">Risk profile</h2>
@@ -231,11 +263,18 @@ export default function InsightsPage() {
                 </p>
               )}
             </Reveal>
-            <RiskDashboard
-              riskMetrics={riskMetrics}
-              holdingVolatilities={holdingVolatilities}
-              index={4}
-            />
+            {riskMetrics ? (
+              <RiskDashboard
+                riskMetrics={riskMetrics}
+                holdingVolatilities={holdingVolatilities}
+                index={4}
+              />
+            ) : (
+              <SectionError
+                label="Couldn't measure risk right now."
+                onRetry={() => setReloadKey((k) => k + 1)}
+              />
+            )}
           </section>
         )}
 
@@ -244,7 +283,14 @@ export default function InsightsPage() {
           <Reveal index={5}>
             <h2 className="mb-3 text-heading text-primary">How you compare</h2>
           </Reveal>
-          {benchmarks && <BenchmarkComparison benchmarks={benchmarks} index={6} />}
+          {benchmarks ? (
+            <BenchmarkComparison benchmarks={benchmarks} index={6} />
+          ) : benchFailed ? (
+            <SectionError
+              label="Couldn't load index returns right now."
+              onRetry={() => setReloadKey((k) => k + 1)}
+            />
+          ) : null}
         </section>
 
         {/* watchlist — research before the money moves */}
