@@ -31,6 +31,7 @@ import type { AnalysisFlag, FixPlan } from "@/lib/analysis/types";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
 import { cn } from "@/lib/utils/cn";
+import { describeFreshness } from "@/lib/utils/freshness";
 
 type Tone = "red" | "amber" | "teal";
 const accent: Record<Tone, { border: string; dot: string }> = {
@@ -244,10 +245,32 @@ export function Results() {
           analysis.pricing.note ? (
             <p className="mt-1.5 text-[11px] leading-snug text-amber">{analysis.pricing.note}</p>
           ) : (
-            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-teal">
-              <span className="h-1.5 w-1.5 rounded-full bg-teal" />
-              Live prices · all {analysis.pricing.total} holdings
-            </p>
+            (() => {
+              // Only claim "live" when the quotes actually are. Anything older
+              // gets an explicit age and a muted dot instead of a teal one.
+              const { label, stale } = describeFreshness(analysis.pricing.pricedAt);
+              return (
+                <p
+                  className={cn(
+                    "mt-1.5 flex items-center gap-1.5 text-[11px]",
+                    stale ? "text-muted" : "text-teal"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      stale ? "bg-muted" : "bg-teal"
+                    )}
+                  />
+                  {label} · all {analysis.pricing.total} holdings
+                  {stale && (
+                    <Link href="/home?edit=1" className="font-semibold text-gold underline underline-offset-2">
+                      Refresh
+                    </Link>
+                  )}
+                </p>
+              );
+            })()
           )
         )}
       </Reveal>

@@ -14,6 +14,7 @@ don't know rather than inventing a return.
 
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Any, Optional
 
 # ticker -> (display name, sector, reference CMP ₹)
@@ -412,6 +413,11 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
             "total": len(holdings),
             "unpricedTickers": unpriced,
             "note": pricing_note,
+            # When these prices were actually fetched. The analysis is cached in
+            # the browser and nothing re-prices it, so a returning user saw
+            # "Live prices" over quotes that could be days old. The UI needs a
+            # timestamp to tell the truth about staleness.
+            "pricedAt": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         },
     }
 

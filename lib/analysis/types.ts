@@ -65,6 +65,8 @@ export interface AnalysisPricing {
   total: number;
   unpricedTickers: string[];
   note: string | null;
+  /** ISO timestamp of when these prices were fetched (absent on older cached analyses) */
+  pricedAt?: string;
 }
 
 export interface Analysis {
