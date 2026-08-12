@@ -58,6 +58,13 @@ export interface ComputedHolding extends Holding {
   value: number;
   investedValue: number;
   returnPct: number;
+  /**
+   * False when no live or reference price could be resolved. Such a holding is
+   * valued at the user's own average, so it renders at exactly 0.0% — visually
+   * identical to a genuinely flat position. The UI must mark it rather than
+   * present it as a measured result.
+   */
+  priced?: boolean;
 }
 
 const rawHoldings: Holding[] = [

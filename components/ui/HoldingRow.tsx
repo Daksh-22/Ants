@@ -41,6 +41,9 @@ export function HoldingRow({ holding, weight, intensity, index = 0 }: HoldingRow
           <div className="flex items-center gap-2">
             <span className="truncate text-[16px] font-semibold text-primary">{holding.name}</span>
             <Badge tone="neutral" size="sm">{holding.sector}</Badge>
+            {holding.priced === false && (
+              <Badge tone="warn" size="sm">No price</Badge>
+            )}
           </div>
           <p className="mt-1 text-[12px] text-muted">
             {holding.shares} {holding.unit} · avg {formatINR(holding.avg)}
@@ -50,9 +53,15 @@ export function HoldingRow({ holding, weight, intensity, index = 0 }: HoldingRow
         {/* right: current value + return % */}
         <div className="shrink-0 text-right">
           <p className="text-[16px] font-semibold text-primary tabular">{formatINR(holding.value)}</p>
-          <p className={cn("text-[14px] font-semibold tabular", positive ? "text-teal" : "text-red")}>
-            {formatPercent(holding.returnPct)}
-          </p>
+          {holding.priced === false ? (
+            // Don't print a 0.0% we didn't measure — it reads as "flat" when
+            // it actually means "we couldn't price this".
+            <p className="text-[13px] font-semibold text-muted">Not priced</p>
+          ) : (
+            <p className={cn("text-[14px] font-semibold tabular", positive ? "text-teal" : "text-red")}>
+              {formatPercent(holding.returnPct)}
+            </p>
+          )}
         </div>
       </div>
 

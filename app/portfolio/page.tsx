@@ -60,6 +60,7 @@ export default function PortfolioPage() {
       value: h.value,
       investedValue: h.invested,
       returnPct: h.returnPct,
+      priced: h.priceSource !== "unpriced",
     }));
     return { rows: adapted, maxAbsReturn: max };
   }, [analysis]);
