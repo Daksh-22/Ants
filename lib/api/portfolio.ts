@@ -2,15 +2,13 @@
  * Ants API client — every backend call in one place.
  *
  * API_BASE comes from NEXT_PUBLIC_API_URL (deployed) or localhost:8000 (dev).
- * Callers should catch — the app degrades to the built-in demo analysis when
- * the backend is unreachable, so no path hard-fails.
+ * Callers must catch. Failures surface to the user as failures — the app no
+ * longer substitutes the built-in demo analysis for a real one.
  */
 
 import type { Analysis } from "@/lib/analysis/types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-/** ws(s):// twin of API_BASE, for the Swarm Radar socket */
-export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -67,7 +65,12 @@ export function analyzePositions(positions: RawPosition[]): Promise<Analysis> {
   });
 }
 
-/** Holdings screenshot → Claude-vision OCR → analysis (demo fallback keyless). */
+/**
+ * Holdings screenshot → Claude-vision OCR → analysis, in one shot.
+ * Prefer extractHoldingsFromScreenshot: it lets the user confirm what was read
+ * before an analysis is built on it. Throws when the read fails — it no longer
+ * returns the demo portfolio dressed up as your screenshot.
+ */
 export async function analyzeScreenshot(file: File): Promise<Analysis> {
   const form = new FormData();
   form.append("file", file);
@@ -91,20 +94,6 @@ export async function extractHoldingsFromScreenshot(file: File): Promise<Extract
   const form = new FormData();
   form.append("file", file);
   return request<ExtractedHoldings>("/api/ocr/extract", { method: "POST", body: form });
-}
-
-/** Broker path: AA consent (mock) then the data-ready webhook → analysis. */
-export async function analyzeBroker(): Promise<Analysis> {
-  const consent = await request<{ consentHandle: string }>("/api/aa/initiate-sync", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ userId: "user_123", mobile: "9999999999" }),
-  });
-  const ready = await request<{ analysis: Analysis }>(
-    `/api/aa/webhook?consentHandle=${encodeURIComponent(consent.consentHandle)}`,
-    { method: "POST" }
-  );
-  return ready.analysis;
 }
 
 // ─── Ticker resolution (entry-time validation) ──────────────────────────────
@@ -243,36 +232,5 @@ export function checkTip(ticker: string, positions: RawPosition[]): Promise<TipC
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify({ ticker, positions }),
-  });
-}
-
-// ─── Execution (Swarm Radar) ────────────────────────────────────────────────
-
-export async function executeProtectedTrade(sector: string) {
-  const symbolMap: Record<string, string> = {
-    "AI Infra": "KAYNES",
-    Defense: "HAL",
-    Power: "TATAPOWER",
-    EMS: "DIXON",
-    Railways: "RVNL",
-  };
-  return request("/api/execution/order", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({
-      symbol: symbolMap[sector] || "NIFTYBEES",
-      qty: 10,
-      price: 2500.0,
-      order_type: "LIMIT",
-    }),
-  });
-}
-
-/** kept for compatibility with earlier callers */
-export function initiateAccountAggregatorSync() {
-  return request("/api/aa/initiate-sync", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ userId: "user_123", mobile: "9999999999" }),
   });
 }
