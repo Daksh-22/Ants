@@ -80,6 +80,34 @@ export async function analyzeBroker(): Promise<Analysis> {
   return ready.analysis;
 }
 
+// ─── Ticker resolution (entry-time validation) ──────────────────────────────
+
+export interface ResolvedTicker {
+  input: string;
+  ticker: string;
+  found: boolean;
+  name: string | null;
+  sector: string | null;
+  cmp: number | null;
+  priceSource: "live" | "reference" | "unpriced";
+}
+
+/**
+ * Confirm symbols before they reach an analysis.
+ *
+ * An unresolvable ticker doesn't fail — it falls back to the user's own average
+ * price, so a typo renders as a real holding sitting at exactly 0.0% and still
+ * counts toward totals, weights and concentration checks. Resolving at entry
+ * turns that silent corruption into a visible "we couldn't find that".
+ */
+export function resolveTickers(tickers: string[]): Promise<{ results: ResolvedTicker[] }> {
+  return request<{ results: ResolvedTicker[] }>("/api/resolve", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ tickers }),
+  });
+}
+
 // ─── Risk metrics (real, from price history) ────────────────────────────────
 
 export interface RiskReply {

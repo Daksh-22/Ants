@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, ArrowLeft, Plus, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Loader2, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useCountUp } from "@/lib/hooks/useCountUp";
 import { formatINR } from "@/lib/utils/formatINR";
 import { cn } from "@/lib/utils/cn";
+import { resolveTickers, type ResolvedTicker } from "@/lib/api/portfolio";
 
 export interface ManualPosition {
   id: string;
@@ -53,6 +54,68 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
       : [emptyRow(), emptyRow()]
   );
   const [triedSubmit, setTriedSubmit] = useState(false);
+
+  // Live symbol confirmation. Without it a typo silently becomes a holding
+  // priced at the user's own average — it reads as a real position at exactly
+  // 0.0% and still skews totals, weights and the concentration flags. Showing
+  // the resolved company name is also the cheapest trust signal in the form:
+  // the user can see we found the same stock they meant.
+  const [lookup, setLookup] = useState<Record<string, ResolvedTicker>>({});
+  const [checking, setChecking] = useState<string[]>([]);
+  const inflight = useRef<Set<string>>(new Set());
+
+  const tickerKeys = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          rows
+            .map((r) => r.ticker.trim().toUpperCase())
+            .filter((t) => t.length >= 2)
+        )
+      ),
+    [rows]
+  );
+
+  useEffect(() => {
+    const pending = tickerKeys.filter(
+      (t) => !(t in lookup) && !inflight.current.has(t)
+    );
+    if (pending.length === 0) return;
+
+    // debounce so we resolve settled input, not every keystroke
+    const timer = setTimeout(() => {
+      pending.forEach((t) => inflight.current.add(t));
+      setChecking((c) => [...c, ...pending]);
+      resolveTickers(pending)
+        .then(({ results }) => {
+          setLookup((prev) => {
+            const next = { ...prev };
+            for (const r of results) next[r.input.trim().toUpperCase()] = r;
+            return next;
+          });
+        })
+        .catch(() => {
+          // backend unreachable — stay silent rather than flagging valid
+          // symbols as unknown, and let submission proceed
+        })
+        .finally(() => {
+          pending.forEach((t) => inflight.current.delete(t));
+          setChecking((c) => c.filter((t) => !pending.includes(t)));
+        });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [tickerKeys, lookup]);
+
+  const statusFor = (raw: string) => {
+    const key = raw.trim().toUpperCase();
+    if (key.length < 2) return null;
+    if (checking.includes(key)) return { state: "checking" as const };
+    const hit = lookup[key];
+    if (!hit) return null;
+    return hit.found
+      ? { state: "found" as const, name: hit.name, cmp: hit.cmp }
+      : { state: "missing" as const };
+  };
 
   const update = (id: string, field: keyof ManualPosition, value: string) =>
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -124,6 +187,7 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
           <AnimatePresence initial={false}>
             {rows.map((row) => {
               const flagged = triedSubmit && isRowTouched(row) && !isRowComplete(row);
+              const status = statusFor(row.ticker);
               return (
                 <motion.div
                   key={row.id}
@@ -132,7 +196,7 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  className="grid grid-cols-[1fr_56px_88px_24px] items-center gap-2"
+                  className="grid grid-cols-[1fr_56px_88px_24px] items-center gap-x-2 gap-y-0"
                 >
                   <input
                     value={row.ticker}
@@ -165,6 +229,39 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
                   >
                     <X size={16} strokeWidth={2.4} />
                   </button>
+
+                  {/* resolved symbol — confirms we found the same stock the
+                      user meant, and catches typos before they become a
+                      holding priced at their own average */}
+                  {status && (
+                    <div className="col-span-4 -mt-0.5 flex items-center gap-1.5 px-1 pb-1">
+                      {status.state === "checking" && (
+                        <>
+                          <Loader2 size={11} className="animate-spin text-muted" />
+                          <span className="text-[11px] text-muted">Checking…</span>
+                        </>
+                      )}
+                      {status.state === "found" && (
+                        <>
+                          <Check size={11} strokeWidth={3} className="text-teal" />
+                          <span className="truncate text-[11px] text-secondary">
+                            {status.name}
+                            {status.cmp !== null && (
+                              <span className="text-muted"> · {formatINR(status.cmp)}</span>
+                            )}
+                          </span>
+                        </>
+                      )}
+                      {status.state === "missing" && (
+                        <>
+                          <AlertCircle size={11} className="text-amber" />
+                          <span className="text-[11px] text-amber">
+                            Couldn&apos;t find that symbol — check the spelling
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </motion.div>
               );
             })}
