@@ -242,7 +242,7 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
                     onClick={() => removeRow(row.id)}
                     disabled={rows.length <= 1}
                     aria-label="Remove row"
-                    className="flex justify-center text-muted transition-opacity disabled:opacity-30"
+                    className="-m-3 flex h-11 w-11 items-center justify-center p-3 text-muted transition-opacity disabled:opacity-30"
                   >
                     <X size={16} strokeWidth={2.4} />
                   </button>

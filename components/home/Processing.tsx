@@ -11,8 +11,10 @@ const STEPS = [
   "Writing the truth…",
 ];
 
-// uneven gaps read as real computation, not a metronome
-const GAPS = [650, 950, 1150];
+// Uneven gaps read as real computation, not a metronome. Kept short: this
+// script used to total ~4s and ran in full even when the analysis came back in
+// 200ms, so every re-scan cost the user four seconds of theatre.
+const GAPS = [320, 480, 560];
 
 interface ProcessingProps {
   onDone: () => void;
@@ -76,13 +78,13 @@ export function Processing({ onDone, waitFor, onCancel }: ProcessingProps) {
     advancedRef.current = true;
     setChecked(4);
     setTease(true);
-    const t1 = setTimeout(() => setFading(true), 900);
+    const t1 = setTimeout(() => setFading(true), 380);
     const t2 = setTimeout(() => {
       if (!doneRef.current) {
         doneRef.current = true;
         onDone();
       }
-    }, 1150);
+    }, 560);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -174,7 +176,7 @@ export function Processing({ onDone, waitFor, onCancel }: ProcessingProps) {
             transition={{ delay: 0.15 }}
             className="mt-7 text-center text-[15px] font-semibold text-gold"
           >
-            Found a few things you won&apos;t like…
+            Almost there…
           </motion.p>
         )}
       </div>

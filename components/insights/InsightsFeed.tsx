@@ -16,6 +16,18 @@ const READ_IDS_KEY = "ants:insights-read-ids";
 const DAILY_XP_CAP = 3; // first three reads per day pay XP
 const SHOWN_TODAY = 4; // drip: only this many unlocked per day, rest teased
 
+/**
+ * Day index, so the daily slice actually rotates.
+ *
+ * rankInsights is a pure function of holdings with no date input, and the
+ * teased 5th card was locked behind a label reading "Tomorrow" — forever. A
+ * user who came back the next day to collect it found the same four cards and
+ * the same permanent lock. Same one-line seed the daily missions use.
+ */
+function dayIndex(): number {
+  return Math.floor(Date.now() / 86_400_000);
+}
+
 interface InsightsFeedProps {
   analysis: Analysis;
 }
@@ -39,7 +51,15 @@ function readIds(): Set<string> {
  */
 export function InsightsFeed({ analysis }: InsightsFeedProps) {
   const { earnXp, unlockAchievement } = useAppState();
-  const insights = useMemo(() => rankInsights(analysis.holdings, SHOWN_TODAY + 1), [analysis]);
+  // Rank the whole pool, then rotate the window by day so tomorrow genuinely
+  // brings different cards and the teased one actually arrives.
+  const ranked = useMemo(() => rankInsights(analysis.holdings, 99), [analysis]);
+  const insights = useMemo(() => {
+    if (ranked.length === 0) return [];
+    const offset = (dayIndex() * SHOWN_TODAY) % ranked.length;
+    const rotated = [...ranked.slice(offset), ...ranked.slice(0, offset)];
+    return rotated.slice(0, SHOWN_TODAY + 1);
+  }, [ranked]);
   const unlocked = insights.slice(0, SHOWN_TODAY);
   const teaser = insights[SHOWN_TODAY];
 

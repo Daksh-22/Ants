@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
+import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
@@ -73,7 +74,9 @@ export default function PortfolioPage() {
   if (!hydrated) return <PageSkeleton />;
 
   return (
-    <div className="px-5 pt-7">
+    <div>
+      <Header />
+      <div className="px-5 pt-7">
       {/* The hero P&L below renders the sample portfolio when the user has no
           analysis of their own. Say so — it read as their money before. */}
       {isDemoView && <DemoBanner className="mb-4" />}
@@ -201,6 +204,7 @@ export default function PortfolioPage() {
           </Reveal>
         </>
       )}
+      </div>
     </div>
   );
 }

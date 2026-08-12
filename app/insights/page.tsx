@@ -280,7 +280,7 @@ export default function InsightsPage() {
 
         {/* benchmarks */}
         <section>
-          <Reveal index={5}>
+          <Reveal index={4}>
             <h2 className="mb-3 text-heading text-primary">How you compare</h2>
           </Reveal>
           {benchmarks ? (
@@ -295,31 +295,31 @@ export default function InsightsPage() {
 
         {/* watchlist — research before the money moves */}
         <section>
-          <Reveal index={7}>
+          <Reveal index={5}>
             <h2 className="mb-3 text-heading text-primary">Thinking of buying?</h2>
           </Reveal>
-          <Reveal index={8}>
+          <Reveal index={6}>
             <SmartWatchlist analysis={analysis} />
           </Reveal>
         </section>
 
         {/* price alerts — decide exits in daylight */}
         <section>
-          <Reveal index={9}>
+          <Reveal index={7}>
             <PriceAlerts analysis={analysis} />
           </Reveal>
         </section>
 
         {/* market insights ranked by holdings */}
         <section>
-          <Reveal index={10}>
+          <Reveal index={8}>
             <InsightsFeed analysis={analysis} />
           </Reveal>
         </section>
 
         {/* sector table */}
         <section className="pb-4">
-          <Reveal index={7}>
+          <Reveal index={9}>
             <SectorPerformance holdings={analysis.holdings} />
           </Reveal>
           {analysis.note && <p className="mt-2 text-[11px] text-muted">{analysis.note}</p>}

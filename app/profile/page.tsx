@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Flame } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -87,7 +88,9 @@ export default function ProfilePage() {
   if (!hydrated) return <PageSkeleton />;
 
   return (
-    <div className="px-5 pt-7">
+    <div>
+      <Header />
+      <div className="px-5 pt-7">
       {isDemoView && <DemoBanner className="mb-4" />}
 
       {/* identity */}
@@ -99,7 +102,7 @@ export default function ProfilePage() {
         <div className="flex items-center gap-4">
           <Avatar initials="🐜" color="gold" size={60} />
           <div className="min-w-0">
-            <h1 className="text-[22px] font-bold leading-tight text-primary">Your portfolio</h1>
+            <h1 className="text-[22px] font-bold leading-tight text-primary">Your profile</h1>
             <p className="mt-0.5 text-[12px] text-muted">
               Stored on this device · no account needed
             </p>
@@ -228,6 +231,7 @@ export default function ProfilePage() {
           them opened sheets listing specific mutual funds and monthly amounts
           the user had never entered. Removed rather than mocked. */}
 
+      </div>
     </div>
   );
 }
