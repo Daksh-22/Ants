@@ -63,8 +63,8 @@ export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
         />
       </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center px-1">
-          <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.32}px` }}>{Math.round(live)}</span>
-          <span className="text-[10px] text-muted leading-none">/100</span>
+          <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.24}px` }}>{Math.round(live)}</span>
+          <span className="text-[8px] text-muted leading-none">/100</span>
         </div>
       </div>
     </div>
