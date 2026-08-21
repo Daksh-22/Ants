@@ -98,7 +98,7 @@ export function Processing({ onDone, waitFor, onCancel }: ProcessingProps) {
       className="fixed inset-0 z-[55] overflow-y-auto bg-base"
     >
       <div className="mx-auto flex min-h-full max-w-app flex-col justify-center px-8">
-        <p className="mb-3 text-center text-[20px] font-extrabold text-gold">Ants</p>
+        <p className="mb-3 text-center text-[20px] font-extrabold text-gold">Sift</p>
 
         {/* determinate-feeling progress bar under the wordmark */}
         <div className="mx-auto mb-8 h-[3px] w-40 overflow-hidden rounded-full bg-elevated">

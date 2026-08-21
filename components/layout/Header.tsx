@@ -7,7 +7,7 @@ import { useAppState } from "@/components/app/AppState";
 import { getLevelBandName } from "@/lib/gamification/xpSystem";
 
 /**
- * Home top bar: "Ants" gold wordmark, plus the two numbers that keep people
+ * Home top bar: "Sift" gold wordmark, plus the two numbers that keep people
  * coming back — the streak flame and the level chip. Progression is always
  * in view; you never forget what you'd lose by not showing up.
  */
@@ -24,7 +24,7 @@ export function Header() {
 
   return (
     <header className="flex items-center justify-between px-5 pt-5">
-      <span className="text-[20px] font-extrabold tracking-tight text-gold">Ants</span>
+      <span className="text-[20px] font-extrabold tracking-tight text-gold">Sift</span>
       <div className="flex items-center gap-2">
         {checkInDue && (
           <button

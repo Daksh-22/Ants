@@ -171,7 +171,7 @@ export function UploadEmptyState({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
         >
-          <p className="text-center text-[20px] font-extrabold text-gold">Ants</p>
+          <p className="text-center text-[20px] font-extrabold text-gold">Sift</p>
 
           <h1 className="mt-6 text-center text-[28px] font-bold leading-[1.2] tracking-[-0.5px] text-primary">
             What is your portfolio
