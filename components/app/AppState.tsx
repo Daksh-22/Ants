@@ -49,7 +49,8 @@ interface AppState {
   hydrated: boolean;
   /** ids of fixes the user has marked done — drives the health score + card states */
   doneFixes: string[];
-  /** the personalized analysis from the backend; null → demo (DEFAULT_ANALYSIS) */
+  /** the user's real analysis from the backend. null means NO portfolio —
+   *  every consumer now renders an empty state for that, never demo data. */
   analysis: Analysis | null;
   /** true when `analysis` is the fallback demo, not the user's real data — the
    *  backend was unreachable when this was set. Results shows a banner + retry. */

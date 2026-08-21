@@ -34,7 +34,7 @@ export default function HomePage() {
 }
 
 function HomeRoute() {
-  const { analyzed, hydrated, setAnalyzed, setAnalysis } = useAppState();
+  const { analyzed, analysis, hydrated, setAnalyzed, setAnalysis } = useAppState();
   const router = useRouter();
   const params = useSearchParams();
 
@@ -145,8 +145,14 @@ function HomeRoute() {
     );
   }
 
-  if (analyzed && !editing) {
-    return <Results />;
+  // `analyzed` and `analysis` are two separate localStorage keys, so they can
+  // disagree: a partial write, or a payload AppState's shape guard rejects on
+  // hydration, leaves analyzed=true with analysis=null. Results used to paper
+  // over that with the demo portfolio. Now the flag alone is not enough —
+  // without the actual analysis we fall through to the upload state, which is
+  // the honest thing to show someone who has no readable portfolio.
+  if (analyzed && analysis && !editing) {
+    return <Results analysis={analysis} />;
   }
 
   return (

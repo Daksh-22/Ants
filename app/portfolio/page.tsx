@@ -11,7 +11,8 @@ import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { HoldingRow } from "@/components/ui/HoldingRow";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { useAppState } from "@/components/app/AppState";
-import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
+import type { Analysis } from "@/lib/analysis/types";
+import { NoPortfolio } from "@/components/ui/NoPortfolio";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { sips, type ComputedHolding } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
@@ -20,7 +21,8 @@ import { cn } from "@/lib/utils/cn";
 
 /**
  * The Portfolio tab renders the SAME live analysis as home — manual /
- * screenshot / broker, falling back to the built-in demo. Holdings, P&L and
+ * screenshot / broker. With no stored analysis this renders NoPortfolio rather
+ * than the built-in demo book. Holdings, P&L and
  * the audit all come off the analysis object; nothing here is invented.
  */
 
@@ -41,9 +43,21 @@ function PageSkeleton() {
   );
 }
 
+/**
+ * Gate, then render. The content component reads `analysis` inside hooks, so
+ * the "no portfolio" check cannot be an early return in there without making
+ * the hook order conditional. This page used to fall back to DEFAULT_ANALYSIS
+ * and show the built-in demo book as the user's own money.
+ */
 export default function PortfolioPage() {
-  const { analysis: stored, doneFixes, hydrated, isDemo } = useAppState();
-  const analysis = stored ?? DEFAULT_ANALYSIS;
+  const { analysis: stored, hydrated } = useAppState();
+  if (!hydrated) return <PageSkeleton />;
+  if (!stored) return <NoPortfolio what="your holdings" />;
+  return <PortfolioPageContent analysis={stored} />;
+}
+
+function PortfolioPageContent({ analysis }: { analysis: Analysis }) {
+  const { doneFixes, isDemo } = useAppState();
 
   // adapt analysis holdings (already winners-first) to the HoldingRow shape.
   // the most saturated bar belongs to the biggest mover — win or loss —
@@ -72,7 +86,7 @@ export default function PortfolioPage() {
   // separate pages and could disagree.
   const isDemoView = isDemo || analysis.source === "demo";
 
-  if (!hydrated) return <PageSkeleton />;
+
 
   return (
     <div>

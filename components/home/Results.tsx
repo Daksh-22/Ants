@@ -25,8 +25,7 @@ const ScoreTrend = dynamic(
   { ssr: false }
 );
 import { useAppState } from "@/components/app/AppState";
-import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
-import type { AnalysisFlag, FixPlan } from "@/lib/analysis/types";
+import type { Analysis, AnalysisFlag, FixPlan } from "@/lib/analysis/types";
 import { formatINR } from "@/lib/utils/formatINR";
 import { formatPercent } from "@/lib/utils/formatPercent";
 import { cn } from "@/lib/utils/cn";
@@ -101,13 +100,13 @@ const sourceLabels: Record<string, string> = {
 
 /**
  * STATE 2 — home after analysis. Renders the LIVE analysis from the backend
- * (manual / screenshot / broker), falling back to the built-in demo. Flags,
+ * (manual / screenshot / broker). `analysis` is a required prop — there is no
+ * demo fallback here any more. Flags,
  * fixes, score and copy all come from the analysis object; marking a fix done
  * climbs the ring, flips the card teal, and drops the attention count.
  */
-export function Results() {
+export function Results({ analysis }: { analysis: Analysis }) {
   const {
-    analysis: stored,
     isDemo,
     doneFixes,
     markFixDone,
@@ -116,7 +115,11 @@ export function Results() {
     gamification,
     unlockAchievement,
   } = useAppState();
-  const analysis = stored ?? DEFAULT_ANALYSIS;
+  // No `?? DEFAULT_ANALYSIS`. Results used to fall back to the built-in demo
+  // book whenever `analyzed` was true but the stored analysis was missing or
+  // failed AppState's hydration shape guard — and unlike /portfolio and
+  // /insights it rendered that stranger's ₹1,04,019 portfolio with no banner at
+  // all. /home now refuses to render this screen without a real analysis.
   const isDemoView = isDemo || analysis.source === "demo";
 
   const [openFixId, setOpenFixId] = useState<string | null>(null);

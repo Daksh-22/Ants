@@ -9,6 +9,8 @@ import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import { useAppState } from "@/components/app/AppState";
+import type { Analysis } from "@/lib/analysis/types";
+import { NoPortfolio } from "@/components/ui/NoPortfolio";
 import { LevelProgress } from "@/components/gamification/LevelProgress";
 import { AchievementCard } from "@/components/gamification/AchievementCard";
 import { chatCount, benchmarkBeatDays } from "@/lib/gamification/lifetimeCounters";
@@ -17,7 +19,6 @@ import {
   getProgressForAchievement,
   type AchievementProgressInputs,
 } from "@/lib/gamification/achievements";
-import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { sips } from "@/lib/data/mock";
 import { formatINR } from "@/lib/utils/formatINR";
@@ -50,9 +51,21 @@ function PageSkeleton() {
   );
 }
 
+/**
+ * Gate, then render. The content component reads `analysis` inside hooks, so
+ * the "no portfolio" check cannot be an early return in there without making
+ * the hook order conditional. This page used to fall back to DEFAULT_ANALYSIS
+ * and show the built-in demo book as the user's own money.
+ */
 export default function ProfilePage() {
-  const { analysis: stored, doneFixes, gamification, hydrated, isDemo } = useAppState();
-  const analysis = stored ?? DEFAULT_ANALYSIS;
+  const { analysis: stored, hydrated } = useAppState();
+  if (!hydrated) return <PageSkeleton />;
+  if (!stored) return <NoPortfolio what="your investor profile" />;
+  return <ProfilePageContent analysis={stored} />;
+}
+
+function ProfilePageContent({ analysis }: { analysis: Analysis }) {
+  const { doneFixes, gamification, isDemo } = useAppState();
 
   // live score — same math as Results: base score + deltas from fixes marked done
   const doneDelta = analysis.flags
@@ -128,7 +141,7 @@ export default function ProfilePage() {
   // separate pages and could disagree.
   const isDemoView = isDemo || analysis.source === "demo";
 
-  if (!hydrated) return <PageSkeleton />;
+
 
   return (
     <div>

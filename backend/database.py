@@ -120,19 +120,54 @@ class Database:
     def __init__(self, client: Optional[Client]):
         self.client = client
 
-    async def create_user(self, email: str) -> dict:
-        """Create user record (Supabase Auth handles password)."""
+    @staticmethod
+    def normalize_email(email: str) -> str:
+        """Emails are case-insensitive in practice; store and match one form.
+
+        Without this, "Alice@x.com" and "alice@x.com" become two accounts and the
+        second signup succeeds where the user expects a login.
+        """
+        return (email or "").strip().lower()
+
+    async def create_user(self, email: str, password_hash: str, name: Optional[str] = None) -> dict:
+        """Insert a user with an already-hashed password.
+
+        Takes the HASH, never the password: keeping hashing at the auth layer
+        means this module cannot accidentally persist a plaintext credential.
+        """
+        email = self.normalize_email(email)
         if not self.client:
-            return {"id": "mock_user", "email": email, "created_at": datetime.now(timezone.utc).isoformat()}
+            return {
+                "id": "mock_user",
+                "email": email,
+                "name": name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        row = {
+            "email": email,
+            "password_hash": password_hash,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if name:
+            row["name"] = name
 
         try:
-            result = self.client.table("users").insert({
-                "email": email,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
+            result = self.client.table("users").insert(row).execute()
             return result.data[0] if result.data else None
         except Exception as e:
             raise ValueError(f"Failed to create user: {str(e)}")
+
+    async def get_user_by_email(self, email: str) -> Optional[dict]:
+        """Look up a user for login. Returns None when there is no such account."""
+        email = self.normalize_email(email)
+        if not self.client:
+            return None
+
+        result = (
+            self.client.table("users").select("*").eq("email", email).limit(1).execute()
+        )
+        return result.data[0] if result.data else None
 
     async def get_user(self, user_id: str) -> Optional[dict]:
         """Get user profile."""

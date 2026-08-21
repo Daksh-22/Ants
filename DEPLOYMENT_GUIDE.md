@@ -150,6 +150,43 @@ from — including a Vercel preview URL, which differs per deployment.
 
 ---
 
+## Supabase schema for accounts
+
+Signup and login are implemented (`auth.signup_user` / `auth.login_user`) but
+they need a `users` table with a `password_hash` column. Passwords are hashed
+with bcrypt at cost 12 in the app; Supabase never sees a plaintext credential,
+and `password_hash` must never be exposed to the anon role.
+
+Run this in the Supabase SQL editor:
+
+```sql
+create table if not exists users (
+  id            uuid primary key default gen_random_uuid(),
+  email         text unique not null,
+  password_hash text not null,
+  name          text,
+  created_at    timestamptz not null default now()
+);
+
+-- Login looks users up by email on every attempt.
+create index if not exists users_email_idx on users (lower(email));
+
+-- The anon key must not be able to read password hashes or enumerate accounts.
+-- The backend uses the anon key, and auth runs server-side, so no policy grants
+-- direct table access: keep RLS on with no permissive select policy for anon.
+alter table users enable row level security;
+```
+
+`portfolios` and `holdings` need `user_id` foreign keys to `users(id)` — every
+portfolio query filters on the `user_id` carried in the JWT, and
+`_verify_portfolio_ownership` rejects a mismatch with a 403, so one account can
+never read another's rows.
+
+Until those tables exist, `/api/auth/*` and `/api/portfolios*` return **503**
+with a message naming the missing variables — not a 500, and not a fake success.
+
+---
+
 ## Local development
 
 `backend/main.py` loads `backend/.env.local`, then `backend/.env`, and neither
@@ -220,6 +257,13 @@ Note: `tesseract` must be on your PATH for the free OCR fallback locally
 
 State these plainly rather than letting a user discover them:
 
+- **Analysis narrative is model-generated.** With a working `ANTHROPIC_API_KEY`,
+  the flags, fixes and "what's working" points are produced by Claude from the
+  computed portfolio facts, not from fixed thresholds. Every number it may cite
+  is computed server-side first, and output is validated before rendering — a
+  flag referencing a holding you don't own is discarded. With no key, or on any
+  API failure, the deterministic engine analysis is served instead, and
+  `generatedBy` reports which one you got (`"ai"` or `"engine"`).
 - **Price alerts do not fire on live price moves.** They are evaluated in the
   browser against the prices from your last analysis, so an alert only resolves
   when you reopen the app and re-run it. Real alerting needs a server-side

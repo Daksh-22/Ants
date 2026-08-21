@@ -5,6 +5,8 @@ import { Header } from "@/components/layout/Header";
 import { Reveal } from "@/components/ui/Reveal";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { useAppState } from "@/components/app/AppState";
+import type { Analysis } from "@/lib/analysis/types";
+import { NoPortfolio } from "@/components/ui/NoPortfolio";
 import { chatCount, recordBenchmarkDay } from "@/lib/gamification/lifetimeCounters";
 import { RiskDashboard } from "@/components/insights/RiskDashboard";
 import { BenchmarkComparison } from "@/components/insights/BenchmarkComparison";
@@ -23,7 +25,6 @@ import {
   type BenchmarksReply,
   type RiskReply,
 } from "@/lib/api/portfolio";
-import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { XP_REWARDS } from "@/lib/gamification/xpSystem";
 import { formatPercent } from "@/lib/utils/formatPercent";
@@ -81,12 +82,26 @@ function InsightsSkeleton() {
 
 /**
  * /insights — the analytics floor. Risk profile, benchmark comparison and the
- * sector heat map, all computed from the live analysis (demo fallback included).
+ * sector heat map, all computed from the user's real analysis. There is no demo
+ * fallback: with no portfolio this route renders NoPortfolio instead.
  * First visit each day earns XP — exploring your own risk is a habit worth paying.
  */
+/**
+ * Gate, then render. The content component below reads `analysis` inside hooks,
+ * so the "no portfolio" check cannot be an early return in there — it would make
+ * the hook order conditional. Splitting keeps hooks unconditional and lets the
+ * empty state be strict: this page used to fall back to DEFAULT_ANALYSIS and
+ * render the built-in demo book's risk and benchmarks as the user's own.
+ */
 export default function InsightsPage() {
-  const { analysis: stored, hydrated, earnXp, isDemo, unlockAchievement } = useAppState();
-  const analysis = stored ?? DEFAULT_ANALYSIS;
+  const { analysis: stored, hydrated } = useAppState();
+  if (!hydrated) return <InsightsSkeleton />;
+  if (!stored) return <NoPortfolio what="your risk and benchmark comparison" />;
+  return <InsightsContent analysis={stored} />;
+}
+
+function InsightsContent({ analysis }: { analysis: Analysis }) {
+  const { hydrated, earnXp, isDemo, unlockAchievement } = useAppState();
 
   // Real risk, computed server-side from a year of daily closes. This used to
   // be a client-side sector→volatility lookup with invented coefficients

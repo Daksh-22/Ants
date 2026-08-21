@@ -687,24 +687,36 @@ def _require_account_store() -> None:
 
 @app.post("/api/auth/signup", tags=["Auth"], response_model=TokenResponse)
 async def signup(payload: SignupRequest):
-    """Create a new user account."""
-    _require_account_store()
-    valid, msg = auth.validate_password(payload.password)
-    if not valid:
-        raise HTTPException(status_code=400, detail=msg)
+    """Create a new user account.
 
-    # TODO: create the user via Supabase Auth and persist auth.hash_password(...).
-    raise HTTPException(status_code=501, detail="Signup is not wired to the user store yet.")
+    Password policy, hashing, duplicate detection and token minting all live in
+    auth.signup_user — one code path owns credentials.
+    """
+    _require_account_store()
+    try:
+        return await auth.signup_user(database.db, payload.email, payload.password, payload.name)
+    except auth.AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    except ValueError as exc:
+        # The store rejected the insert (unique-constraint race, RLS denial).
+        # Don't echo the driver's message — it can name tables and columns.
+        raise HTTPException(status_code=409, detail="Couldn't create that account. Try logging in.") from exc
 
 
 @app.post("/api/auth/login", tags=["Auth"], response_model=TokenResponse)
 async def login(payload: LoginRequest):
-    """Login to existing account."""
-    _require_account_store()
+    """Log in to an existing account.
 
-    # TODO: look the user up and verify with auth.verify_password(...).
-    # Never mint a token without checking the password.
-    raise HTTPException(status_code=501, detail="Login is not wired to the user store yet.")
+    The token carries the user_id that _verify_portfolio_ownership and every
+    /api/portfolios* query filter on, so a session only ever reaches its own
+    rows. A wrong password and an unknown email return the same 401 — see
+    auth.login_user.
+    """
+    _require_account_store()
+    try:
+        return await auth.login_user(database.db, payload.email, payload.password)
+    except auth.AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 @app.get("/api/auth/profile", tags=["Auth"])
