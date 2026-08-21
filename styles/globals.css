@@ -68,7 +68,22 @@ body::before {
     radial-gradient(ellipse 60% 40% at 110% 105%, rgba(139, 92, 246, 0.045), transparent 60%);
 }
 
-/* everything renders above the ambient layer */
+/* precision grid backdrop — separating signal from noise */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(0deg, rgba(232, 160, 32, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 160, 32, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: 0 0, 0 0;
+  opacity: 0.3;
+}
+
+/* everything renders above the ambient layer and grid */
 body > * {
   position: relative;
   z-index: 1;
@@ -119,12 +134,43 @@ body > * {
     0 16px 40px -16px rgba(0, 0, 0, 0.65);
 }
 
+/* precision grid accent — highlights structure */
+.grid-accent {
+  position: relative;
+  background-image:
+    linear-gradient(0deg, rgba(232, 160, 32, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 160, 32, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
 /* frosted chrome — bottom dock, sticky headers, sheets */
 .glass {
   background: rgba(16, 16, 20, 0.72);
   backdrop-filter: blur(20px) saturate(1.5);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* precision divider — horizontal line with grid alignment */
+.divider-precision {
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(232, 160, 32, 0.15) 20%,
+    rgba(232, 160, 32, 0.15) 80%,
+    transparent 100%);
+  position: relative;
+}
+
+/* signal highlight — emphasize important metrics */
+.signal-highlight {
+  position: relative;
+  padding: 2px;
+  background: linear-gradient(135deg,
+    rgba(232, 160, 32, 0.1) 0%,
+    rgba(232, 160, 32, 0.04) 100%);
+  border: 1px solid rgba(232, 160, 32, 0.2);
+  border-radius: 8px;
 }
 
 /* gold-washed hero fills (level bars, primary CTAs) */

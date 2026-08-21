@@ -29,8 +29,18 @@ export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
   const tone = toneFor(score);
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90 [filter:drop-shadow(0_0_6px_var(--ring-glow))]" style={{ ["--ring-glow" as string]: tone.glow }}>
+    <div className="relative shrink-0" style={{ width: size + 16, height: size + 16 }}>
+      {/* precision grid frame */}
+      <div className="absolute inset-0 rounded-full border border-[rgba(232,160,32,0.15)]" style={{
+        backgroundImage: `
+          linear-gradient(0deg, rgba(232,160,32,0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(232,160,32,0.04) 1px, transparent 1px)
+        `,
+        backgroundSize: '24px 24px',
+      }} />
+
+      <div className="absolute inset-8 flex items-center justify-center">
+        <svg width={size} height={size} className="-rotate-90 [filter:drop-shadow(0_0_6px_var(--ring-glow))]" style={{ ["--ring-glow" as string]: tone.glow }}>
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -52,9 +62,10 @@ export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
           style={{ transition: "stroke 0.4s ease" }}
         />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center px-1">
-        <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.32}px` }}>{Math.round(live)}</span>
-        <span className="text-[10px] text-muted leading-none">/100</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-1">
+          <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.32}px` }}>{Math.round(live)}</span>
+          <span className="text-[10px] text-muted leading-none">/100</span>
+        </div>
       </div>
     </div>
   );
