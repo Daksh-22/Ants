@@ -52,9 +52,9 @@ export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
           style={{ transition: "stroke 0.4s ease" }}
         />
       </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`text-[24px] font-bold leading-none tabular ${tone.text}`}>{Math.round(live)}</span>
-        <span className="ml-0.5 self-end pb-1 text-[12px] text-muted">/100</span>
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-1">
+        <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.32}px` }}>{Math.round(live)}</span>
+        <span className="text-[10px] text-muted leading-none">/100</span>
       </div>
     </div>
   );
