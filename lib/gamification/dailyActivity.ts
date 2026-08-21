@@ -39,6 +39,26 @@ export function recordActivity(kind: ActivityKind): void {
   }
 }
 
+/**
+ * Undo one bump, for actions the user can take back.
+ *
+ * Marking a fix done records a "fix" and pays XP; undoing it used to reverse
+ * neither, so mark/undo cycles satisfied the "complete a fix" mission and
+ * farmed XP without a single fix actually being done. Floors at zero and never
+ * resurrects a stale day — a rolled-over log simply has nothing to decrement.
+ */
+export function undoActivity(kind: ActivityKind): void {
+  const log = load();
+  const current = log.counts[kind] ?? 0;
+  if (current <= 0) return;
+  log.counts[kind] = current - 1;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(log));
+  } catch {
+    // ignore persistence failures
+  }
+}
+
 /** how many times this activity happened today */
 export function activityToday(kind: ActivityKind): number {
   return load().counts[kind] ?? 0;

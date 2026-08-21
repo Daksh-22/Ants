@@ -49,12 +49,39 @@ def _note_failure(exc: Exception) -> None:
         _last_error = f"{name}: {exc}"
 
 
+def _note_success() -> None:
+    global _last_error
+    _last_error = None
+
+
 def _get_client():
     global _client
     if _client is None and have_ai():
         from anthropic import Anthropic
         _client = Anthropic()
     return _client
+
+
+def _call(client, **kwargs):
+    """Single funnel for every Claude call, so success clears the error too.
+
+    Nothing ever reset _last_error. One transient 429 therefore pinned
+    /healthz red for the rest of the process lifetime and kept rewording
+    unrelated user-facing copy: main.py words the OCR reply from last_error(),
+    so a user whose vision call succeeded but found no holdings was told
+    "screenshot reading is down" instead of "couldn't read any holdings".
+
+    It also broke the repair loop this field exists for — after an operator
+    replaced a rejected key, /healthz kept reporting the old 401 until the
+    service was restarted, so the fix looked like it had not worked.
+    """
+    try:
+        msg = client.messages.create(model=MODEL, **kwargs)
+    except Exception as exc:
+        _note_failure(exc)
+        raise
+    _note_success()
+    return msg
 
 
 def _text_of(msg) -> str:
@@ -107,8 +134,8 @@ def extract_holdings(image_b64: str, media_type: str) -> Optional[list[dict[str,
     if client is None:
         return None
     try:
-        msg = client.messages.create(
-            model=MODEL,
+        msg = _call(
+            client,
             max_tokens=1500,
             tools=[_OCR_TOOL],
             tool_choice={"type": "tool", "name": "report_holdings"},
@@ -172,8 +199,8 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
                 for h in analysis["holdings"]
             ],
         }
-        msg = client.messages.create(
-            model=MODEL,
+        msg = _call(
+            client,
             max_tokens=1800,
             system=VOICE,
             messages=[{
@@ -220,8 +247,8 @@ def polish_verdict(check: dict[str, Any], holdings: list[dict[str, Any]]) -> dic
         return check
     try:
         slim = [{k: h[k] for k in ("name", "sector", "weightPct", "returnPct")} for h in holdings]
-        msg = client.messages.create(
-            model=MODEL,
+        msg = _call(
+            client,
             max_tokens=300,
             system=VOICE,
             messages=[{
@@ -281,8 +308,8 @@ def chat(question: str, analysis: Optional[dict[str, Any]] = None) -> dict[str, 
         context_parts.append("THE USER'S PORTFOLIO ANALYSIS:\n" + json.dumps(slim))
 
     try:
-        msg = client.messages.create(
-            model=MODEL,
+        msg = _call(
+            client,
             max_tokens=700,
             system=VOICE + (
                 " Answer the user's investing question using the knowledge base and their portfolio "

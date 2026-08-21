@@ -55,15 +55,27 @@ function HomeRoute() {
   // kept so Retry re-runs the same request instead of discarding the input
   const lastFetcherRef = useRef<(() => Promise<Analysis>) | null>(null);
 
+  // Each attempt gets a number, and only the newest one may touch state.
+  // Cancel and Retry both leave the previous request in flight — nothing
+  // aborts it — so a superseded attempt would still resolve later and write
+  // over the current screen. The 45s client timeout made that routine: cancel
+  // a cold-start request, retry, succeed, and half a minute later the old
+  // attempt's rejection replaced the rendered Results with a dead-end error
+  // while the analysis sat correctly saved in /portfolio.
+  const runIdRef = useRef(0);
+
   const start = (fetcher: () => Promise<Analysis>) => {
+    const runId = ++runIdRef.current;
     resultRef.current = null;
     lastFetcherRef.current = fetcher;
     setFailure(null);
     pendingRef.current = fetcher()
       .then((a) => {
+        if (runId !== runIdRef.current) return;
         resultRef.current = a;
       })
       .catch((err: unknown) => {
+        if (runId !== runIdRef.current) return;
         resultRef.current = null;
         setFailure(
           err instanceof ApiTimeoutError
@@ -79,6 +91,7 @@ function HomeRoute() {
   const finish = () => {
     setProcessing(false);
     if (!resultRef.current) return; // failure state renders instead
+    setFailure(null);
     setAnalysis(resultRef.current, false);
     setAnalyzed(true);
   };
@@ -90,7 +103,7 @@ function HomeRoute() {
   // avoid an empty→results flash before localStorage is read
   if (!hydrated) {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-base">
+      <div className="fixed inset-0 z-[55] flex items-center justify-center bg-base">
         <span className="text-[20px] font-extrabold text-gold">Ants</span>
       </div>
     );
@@ -102,6 +115,10 @@ function HomeRoute() {
         onDone={finish}
         waitFor={pendingRef.current ?? undefined}
         onCancel={() => {
+          // Retire this attempt so its later resolution can't overwrite the
+          // cancellation notice with a timeout message the user never caused.
+          runIdRef.current += 1;
+          resultRef.current = null;
           setProcessing(false);
           setFailure("Cancelled. Your positions are still saved.");
         }}
@@ -117,6 +134,12 @@ function HomeRoute() {
         onEdit={() => {
           setFailure(null);
           lastFetcherRef.current = null;
+          // Without this, "Edit what I entered" cleared the error and fell
+          // through to whichever branch matched next: a returning user landed
+          // back on the STALE previous Results with their edits nowhere in
+          // sight, and a first-timer got the upload/manual chooser instead of
+          // the form they had just filled in.
+          setEditing(true);
         }}
       />
     );
@@ -153,7 +176,7 @@ function AnalysisFailed({
   onEdit: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-base">
+    <div className="fixed inset-0 z-[55] overflow-y-auto bg-base">
       <div className="mx-auto flex min-h-full max-w-app flex-col justify-center px-6 py-10">
         <div className="flex items-center gap-2.5">
           <AlertTriangle size={20} className="shrink-0 text-amber" />

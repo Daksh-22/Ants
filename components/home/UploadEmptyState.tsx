@@ -102,8 +102,17 @@ export function UploadEmptyState({
         // ignore persistence failures — the in-memory rows still work
       }
       setView("review");
-    } catch {
-      setError("Couldn't reach the screenshot reader right now — try manual entry instead.");
+    } catch (err: unknown) {
+      // The backend distinguishes "not an image", "over 8MB — crop to the
+      // holdings list", and "isn't a readable image", and the API client turns
+      // an unset NEXT_PUBLIC_API_URL into a message naming that variable.
+      // Collapsing all of it into "couldn't reach the reader" sent people back
+      // to retry the same oversized HEIC instead of cropping it.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Couldn't reach the screenshot reader right now — try manual entry instead."
+      );
     } finally {
       setReading(false);
       // let the same file be picked again after a failure
@@ -155,7 +164,7 @@ export function UploadEmptyState({
   }
 
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-base">
+    <div className="fixed inset-0 z-[55] overflow-y-auto bg-base">
       <div className="mx-auto flex min-h-full max-w-app flex-col justify-center px-6 py-10">
         <motion.div
           initial={{ opacity: 0, y: 12 }}

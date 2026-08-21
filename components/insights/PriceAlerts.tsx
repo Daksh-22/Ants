@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Target, X } from "lucide-react";
 import type { Analysis } from "@/lib/analysis/types";
 import type { PriceAlert } from "@/lib/insights/types";
+import { fetchLiveQuotes } from "@/lib/api/portfolio";
 import { useAppState } from "@/components/app/AppState";
 import { XP_REWARDS } from "@/lib/gamification/xpSystem";
 import { recordActivity } from "@/lib/gamification/dailyActivity";
@@ -43,8 +44,23 @@ export function PriceAlerts({ analysis }: PriceAlertsProps) {
   const [target, setTarget] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [justTriggered, setJustTriggered] = useState<string | null>(null);
+  // Prices fetched now, rather than whatever was frozen into the analysis.
+  const [liveQuotes, setLiveQuotes] = useState<Record<string, number>>({});
+  const [pricedAt, setPricedAt] = useState<string | null>(null);
+  const [repricing, setRepricing] = useState(false);
 
-  const cmpOf = (t: string) => analysis.holdings.find((h) => h.ticker === t)?.cmp ?? null;
+  /**
+   * Best available price for a ticker: a quote fetched during this visit if we
+   * got one, otherwise the analysis snapshot.
+   *
+   * The sweep used to read only the snapshot, so an alert could only ever notice
+   * a crossing that had already happened by the time the user last ran an
+   * analysis. Re-pricing on open means opening the app actually checks the
+   * market. This is still not push — nothing fires while the app is closed —
+   * and the footer says so rather than implying a live watcher.
+   */
+  const cmpOf = (t: string) =>
+    liveQuotes[t] ?? analysis.holdings.find((h) => h.ticker === t)?.cmp ?? null;
 
   const persist = (next: PriceAlert[]) => {
     setAlerts(next);
@@ -55,7 +71,10 @@ export function PriceAlerts({ analysis }: PriceAlertsProps) {
     }
   };
 
-  // load + trigger sweep: fire any active alert whose price has crossed
+  // load + trigger sweep: fire any active alert whose price has crossed.
+  // Depends on liveQuotes too, so the sweep re-runs once fresh prices land —
+  // reading only `analysis` meant a crossing that happened after the last
+  // analysis was invisible until the user re-ran one.
   useEffect(() => {
     const stored = loadAlerts();
     let fired = 0;
@@ -88,7 +107,48 @@ export function PriceAlerts({ analysis }: PriceAlertsProps) {
       setAlerts(swept);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis]);
+  }, [analysis, liveQuotes]);
+
+  /**
+   * Re-price every ticker that has an active alert.
+   *
+   * Unpriced quotes are dropped, not stored: their price is 0, and letting a 0
+   * through would instantly satisfy every buy-the-dip target and fire a wave of
+   * alerts for crossings that never happened.
+   */
+  const reprice = async (watched: string[]) => {
+    if (watched.length === 0 || repricing) return;
+    setRepricing(true);
+    try {
+      const reply = await fetchLiveQuotes(watched);
+      const fresh: Record<string, number> = {};
+      for (const [ticker, q] of Object.entries(reply.quotes)) {
+        if (q.source === "live" && q.price > 0) fresh[ticker] = q.price;
+      }
+      if (Object.keys(fresh).length > 0) {
+        setLiveQuotes((prev) => ({ ...prev, ...fresh }));
+        setPricedAt(reply.asOf ?? new Date().toISOString());
+      }
+    } catch {
+      // Leave the snapshot prices in place; the footer keeps saying they're
+      // from the last scan rather than claiming a check that didn't happen.
+    } finally {
+      setRepricing(false);
+    }
+  };
+
+  // Re-price on open, once, for whatever has an active alert.
+  const didRepriceRef = useRef(false);
+  useEffect(() => {
+    if (didRepriceRef.current) return;
+    const watched = loadAlerts()
+      .filter((a) => a.status === "active")
+      .map((a) => a.ticker);
+    if (watched.length === 0) return;
+    didRepriceRef.current = true;
+    void reprice([...new Set(watched)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addAlert = () => {
     const t = ticker.trim().toUpperCase();
@@ -266,6 +326,35 @@ export function PriceAlerts({ analysis }: PriceAlertsProps) {
         <p className="mt-4 text-center text-[12px] text-muted">
           No targets set. Exits planned in daylight beat exits panicked at 3am.
         </p>
+      )}
+
+      {/* Say plainly what this feature is. Targets are checked in your browser
+          when you open the app — there is no server-side watcher and no push, so
+          an alert cannot reach you while the app is closed. Claiming otherwise
+          would be the most costly lie on this screen: someone could hold a
+          position expecting to be told when it moved. */}
+      {alerts.some((a) => a.status === "active") && (
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-subtle pt-3">
+          <p className="text-[11px] leading-snug text-muted">
+            {repricing
+              ? "Checking prices…"
+              : pricedAt
+                ? "Checked against live prices when you opened this. No alerts while the app is closed."
+                : "Using prices from your last scan. No alerts while the app is closed."}
+          </p>
+          <button
+            type="button"
+            onClick={() =>
+              void reprice([
+                ...new Set(alerts.filter((a) => a.status === "active").map((a) => a.ticker)),
+              ])
+            }
+            disabled={repricing}
+            className="shrink-0 text-[12px] font-semibold text-gold underline underline-offset-4 disabled:opacity-40"
+          >
+            Check now
+          </button>
+        </div>
       )}
     </Card>
   );

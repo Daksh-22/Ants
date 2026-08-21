@@ -13,20 +13,32 @@ interface SectorHeatMapProps {
   holdings: AnalysisHolding[];
 }
 
-/** teal = gains, red = losses, amber = roughly flat — colors never cross roles */
-function tileTextClass(returnPct: number): string {
+/**
+ * teal = gains, red = losses, amber = roughly flat — colors never cross roles.
+ * A null return means "we couldn't price this sector", which is neither a gain,
+ * a loss, nor flat: it renders neutral grey so an unmeasured sector can't be
+ * mistaken for a measured one sitting at zero.
+ */
+function tileTextClass(returnPct: number | null): string {
+  if (returnPct === null) return "text-muted";
   if (returnPct >= 2) return "text-teal";
   if (returnPct <= -2) return "text-red";
   return "text-amber";
 }
 
 /** heat scales with magnitude — a +40% sector and a +2% sector don't look the same */
-function tileBackground(returnPct: number): string {
+function tileBackground(returnPct: number | null): string {
+  if (returnPct === null) return "rgba(255, 255, 255, 0.06)";
   const magnitude = Math.min(Math.abs(returnPct) / 25, 1); // saturates around ±25%
   const alpha = 0.12 + magnitude * 0.28; // 12% → 40%
   if (returnPct >= 2) return `rgba(0, 214, 158, ${alpha})`;
   if (returnPct <= -2) return `rgba(255, 92, 92, ${alpha})`;
   return "rgba(255, 176, 32, 0.16)";
+}
+
+/** "—" for an unmeasurable sector return; never a plausible-looking 0.0% */
+function formatSectorReturn(returnPct: number | null): string {
+  return returnPct === null ? "—" : formatPercent(returnPct);
 }
 
 /**
@@ -78,7 +90,7 @@ export function SectorHeatMap({ holdings }: SectorHeatMapProps) {
           <p className="mt-0.5 text-[11px] font-semibold opacity-80 tabular">
             {s.weight_pct.toFixed(0)}%
           </p>
-          <p className="text-[11px] font-bold tabular">{formatPercent(s.return_pct)}</p>
+          <p className="text-[11px] font-bold tabular">{formatSectorReturn(s.return_pct)}</p>
         </motion.button>
       ))}
     </div>
@@ -88,7 +100,13 @@ export function SectorHeatMap({ holdings }: SectorHeatMapProps) {
     <Card>
       <div className="mb-3 flex items-baseline justify-between">
         <p className="text-[15px] font-semibold text-primary">Sector heat map</p>
-        <p className="text-[11px] text-muted">size = weight · color = return · tap a tile ↓</p>
+        {/* The caption used to read "size = weight". Rows are independent flex
+            containers split by cumulative weight, so flexGrow normalises per
+            row, not across the card: two sectors of identical weight can differ
+            ~1.5x in width, and Math.max(weight, 8) floors small ones further.
+            Encoding weight in width faithfully needs a treemap; until then the
+            per-tile percentage is the number to trust, and the caption says so. */}
+        <p className="text-[11px] text-muted">% = weight · color = return · tap a tile ↓</p>
       </div>
 
       <div className="space-y-1.5">
@@ -115,14 +133,21 @@ export function SectorHeatMap({ holdings }: SectorHeatMapProps) {
                       {formatINR(h.value)} · {h.weightPct.toFixed(1)}% of portfolio
                     </p>
                   </div>
-                  <span
-                    className={cn(
-                      "shrink-0 text-[13px] font-bold tabular",
-                      h.returnPct >= 0 ? "text-teal" : "text-red"
-                    )}
-                  >
-                    {formatPercent(h.returnPct)}
-                  </span>
+                  {h.priceSource === "unpriced" ? (
+                    // Matches /portfolio's HoldingRow. This used to render the
+                    // engine's placeholder 0% as a teal "+0.0%", i.e. a measured
+                    // flat result, for a holding we could not price at all.
+                    <span className="shrink-0 text-[11px] font-semibold text-muted">No price</span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "shrink-0 text-[13px] font-bold tabular",
+                        h.returnPct >= 0 ? "text-teal" : "text-red"
+                      )}
+                    >
+                      {formatPercent(h.returnPct)}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -161,10 +186,10 @@ export function SectorPerformance({ holdings }: SectorHeatMapProps) {
                 <span
                   className={cn(
                     "w-14 text-right text-[13px] font-bold tabular",
-                    s.return_pct >= 0 ? "text-teal" : "text-red"
+                    s.return_pct === null ? "text-muted" : s.return_pct >= 0 ? "text-teal" : "text-red"
                   )}
                 >
-                  {formatPercent(s.return_pct)}
+                  {formatSectorReturn(s.return_pct)}
                 </span>
               </div>
             </div>
@@ -173,7 +198,10 @@ export function SectorPerformance({ holdings }: SectorHeatMapProps) {
                 initial={{ width: 0 }}
                 animate={{ width: `${(s.weight_pct / maxWeight) * 100}%` }}
                 transition={{ type: "spring", stiffness: 120, damping: 22, delay: 0.1 + i * 0.05 }}
-                className={cn("h-full rounded-full", s.return_pct >= 0 ? "bg-teal" : "bg-red")}
+                className={cn(
+                  "h-full rounded-full",
+                  s.return_pct === null ? "bg-muted" : s.return_pct >= 0 ? "bg-teal" : "bg-red"
+                )}
               />
             </div>
           </div>

@@ -149,101 +149,63 @@ export const ACHIEVEMENT_DEFINITIONS: Record<string, Omit<Achievement, 'unlocked
   },
 };
 
-export function checkAchievementUnlock(
-  achievementId: string,
-  streakDays?: number,
-  fixesCompleted?: number,
-  healthScore?: number,
-  holdingsCount?: number,
-  concentration?: number,
-  chatQueries?: number,
-  sharpeRatio?: number,
-  volatility?: number,
-  portfolioPerformanceVsNifty?: number,
-  benchmarkDaysBeating?: number,
-  researchedStocks?: number,
-  insightsRead?: number,
-  priceTargetsHit?: number,
-  sectorCount?: number
-): boolean {
-  switch (achievementId) {
-    case 'first_scan':
-      return true; // triggered manually on first analysis
-    case 'habit_former_10':
-      return streakDays ? streakDays >= 10 : false;
-    case 'discipline_master_50':
-      return streakDays ? streakDays >= 50 : false;
-    case 'century_club':
-      return streakDays ? streakDays >= 100 : false;
-    case 'problem_solver_5':
-      return fixesCompleted ? fixesCompleted >= 5 : false;
-    case 'portfolio_surgeon_20':
-      return fixesCompleted ? fixesCompleted >= 20 : false;
-    case 'strong_portfolio':
-      return healthScore ? healthScore >= 80 : false;
-    case 'diversifier':
-      return holdingsCount ? holdingsCount >= 10 : false;
-    case 'balanced_mind':
-      return concentration ? concentration < 30 : false;
-    case 'ask_ants_master':
-      return chatQueries ? chatQueries >= 10 : false;
-    case 'risk_manager':
-      return sharpeRatio ? sharpeRatio > 1.0 : false;
-    case 'volatility_tamer':
-      // Lower volatility than typical (assume 20% is median)
-      return volatility ? volatility < 20 : false;
-    case 'benchmark_beater':
-      return benchmarkDaysBeating ? benchmarkDaysBeating >= 30 : false;
-    case 'market_sage':
-      // Outperforming all three benchmarks
-      return portfolioPerformanceVsNifty ? portfolioPerformanceVsNifty > 0 : false;
-    case 'diversified_investor':
-      return sectorCount ? sectorCount >= 5 : false;
-    case 'researcher':
-      return researchedStocks ? researchedStocks >= 5 : false;
-    case 'market_watcher':
-      return insightsRead ? insightsRead >= 10 : false;
-    case 'target_spotter':
-      return priceTargetsHit ? priceTargetsHit >= 1 : false;
-    case 'hawkeye':
-      return priceTargetsHit ? priceTargetsHit >= 5 : false;
-    default:
-      return false;
-  }
+// checkAchievementUnlock() was removed: nothing imported it, and it had two
+// bugs waiting for whoever did. Its truthiness guards meant a real measured zero
+// read as "not achieved" (`concentration ? concentration < 30 : false` fails a
+// perfectly diversified 0% concentration), and `market_sage` — described as
+// beating all three benchmarks — checked only vs_nifty. Unlocks are driven
+// directly from the call sites in Results/PriceAlerts/InsightsFeed instead.
+
+/**
+ * Counters behind the progress bars. A named object rather than eleven optional
+ * positionals: the caller used to pass just the first two, so every badge
+ * measured by any other counter silently rendered "0/5" or "0/10" no matter what
+ * the user had done — a user with 4 researched tickers saw "Researcher 0/5".
+ * With named fields, a missing counter is visible at the call site.
+ */
+export interface AchievementProgressInputs {
+  streakDays?: number;
+  fixesCompleted?: number;
+  chatQueries?: number;
+  benchmarkDaysBeating?: number;
+  researchedStocks?: number;
+  insightsRead?: number;
+  priceTargetsHit?: number;
 }
 
+/**
+ * Progress toward a locked achievement, or null when it genuinely cannot be
+ * measured yet — the UI then omits the bar instead of asserting zero progress.
+ */
 export function getProgressForAchievement(
   achievementId: string,
-  streakDays?: number,
-  fixesCompleted?: number,
-  chatQueries?: number,
-  benchmarkDaysBeating?: number,
-  researchedStocks?: number,
-  insightsRead?: number,
-  priceTargetsHit?: number
-): { progress: number; maxProgress: number } {
+  inputs: AchievementProgressInputs = {}
+): { progress: number; maxProgress: number } | null {
+  const bar = (value: number | undefined, maxProgress: number) =>
+    value === undefined ? null : { progress: value, maxProgress };
+
   switch (achievementId) {
     case 'habit_former_10':
-      return { progress: streakDays || 0, maxProgress: 10 };
+      return bar(inputs.streakDays, 10);
     case 'discipline_master_50':
-      return { progress: streakDays || 0, maxProgress: 50 };
+      return bar(inputs.streakDays, 50);
     case 'century_club':
-      return { progress: streakDays || 0, maxProgress: 100 };
+      return bar(inputs.streakDays, 100);
     case 'problem_solver_5':
-      return { progress: fixesCompleted || 0, maxProgress: 5 };
+      return bar(inputs.fixesCompleted, 5);
     case 'portfolio_surgeon_20':
-      return { progress: fixesCompleted || 0, maxProgress: 20 };
+      return bar(inputs.fixesCompleted, 20);
     case 'ask_ants_master':
-      return { progress: chatQueries || 0, maxProgress: 10 };
+      return bar(inputs.chatQueries, 10);
     case 'benchmark_beater':
-      return { progress: benchmarkDaysBeating || 0, maxProgress: 30 };
+      return bar(inputs.benchmarkDaysBeating, 30);
     case 'researcher':
-      return { progress: researchedStocks || 0, maxProgress: 5 };
+      return bar(inputs.researchedStocks, 5);
     case 'market_watcher':
-      return { progress: insightsRead || 0, maxProgress: 10 };
+      return bar(inputs.insightsRead, 10);
     case 'hawkeye':
-      return { progress: priceTargetsHit || 0, maxProgress: 5 };
+      return bar(inputs.priceTargetsHit, 5);
     default:
-      return { progress: 0, maxProgress: 1 };
+      return null;
   }
 }

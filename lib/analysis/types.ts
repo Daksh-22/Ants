@@ -56,7 +56,8 @@ export interface AnalysisHolding {
   known: boolean;
   /** how this holding got its price — live quote, stale reference snapshot,
    *  or not priced at all (return shows 0%). Older payloads omit it. */
-  priceSource?: "live" | "reference" | "unpriced";
+  /** "reference" is retired: see backend/engine.py KNOWN_STOCKS */
+  priceSource?: "live" | "unpriced";
 }
 
 /** how well the whole book could be priced — drives an honesty banner */

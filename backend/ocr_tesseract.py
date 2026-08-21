@@ -20,15 +20,42 @@ from engine import KNOWN_STOCKS
 
 
 def _find_ticker_in_line(line: str) -> str | None:
-    """Match a line of OCR text against a known ticker or company name."""
-    upper = line.upper()
-    for ticker, (name, _sector, _cmp) in KNOWN_STOCKS.items():
-        if re.search(rf"\b{re.escape(ticker)}\b", upper):
-            return ticker
-        first_word = name.upper().split()[0]
-        if len(first_word) > 3 and first_word in upper:
-            return ticker
-    return None
+    """Match a line of OCR text against a known ticker or company name.
+
+    Two things were wrong here. The loop returned on the first entry matching
+    EITHER test, so a loose company-name hit on an early dict entry beat an exact
+    ticker match on a later one. And the name test compared only the first word
+    with len > 3, so any shared leading word collided: "TATA MOTORS 10 985"
+    matched TATAPOWER (both start "TATA") and "BHARAT FORGE 5 1200" matched BEL
+    (Bharat Electronics). Dictionary order silently decided which company the
+    user's holding became.
+
+    Now: exact ticker symbols win outright, then full company names as phrases,
+    longest match first so "Tata Motors" cannot lose to "Tata Power".
+    """
+    upper = " ".join(line.upper().split())
+
+    def matched_len(needle: str) -> int:
+        """Length of `needle` if it appears as a whole token-run, else 0."""
+        if len(needle) < 3:
+            return 0
+        return (
+            len(needle)
+            if re.search(rf"(?<![A-Z0-9]){re.escape(needle)}(?![A-Z0-9])", upper)
+            else 0
+        )
+
+    # Score every candidate by how much of the line it actually explains, and
+    # take the longest. Checking tickers before names let a short alias win on
+    # position alone: "HDFC Bank 30 1600" matched the ticker HDFC rather than
+    # HDFCBANK, and HDFC.NS is delisted post-merger, so the holding came back
+    # unpriced. "HDFC BANK" is the longer, more specific match, so it wins.
+    best: tuple[int, str] | None = None
+    for ticker, (name, _sector) in KNOWN_STOCKS.items():
+        span = max(matched_len(ticker), matched_len(" ".join(name.upper().split())))
+        if span and (best is None or span > best[0]):
+            best = (span, ticker)
+    return best[1] if best else None
 
 
 def _numbers_in_line(line: str) -> list[float]:
@@ -71,11 +98,16 @@ def extract_holdings_tesseract(image_bytes: bytes) -> list[dict[str, Any]]:
         if len(numbers) < 2:
             continue
 
-        # qty is usually the smallest whole-number-looking value under 10,000
+        # qty is the SMALLEST whole-number-looking value, not the first one.
+        # Taking qty_candidates[0] read a row like "INFY 1,612.00 8 1,445.00"
+        # (LTP, qty, avg) as qty=1612 and then avg=8 — both wrong, and both
+        # plausible enough on screen to survive review.
         qty_candidates = [n for n in numbers if n < 10_000 and n == int(n)]
-        qty = qty_candidates[0] if qty_candidates else min(numbers)
+        qty = min(qty_candidates) if qty_candidates else min(numbers)
         remaining = [n for n in numbers if n != qty]
-        avg = remaining[0] if remaining else None
+        # Of what's left, the smallest is the per-unit price; larger figures on a
+        # broker row are totals (invested / current value), not an average.
+        avg = min(remaining) if remaining else None
         if not avg or avg <= 0:
             continue
 

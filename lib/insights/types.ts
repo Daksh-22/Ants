@@ -5,9 +5,16 @@
 
 export interface RiskMetrics {
   volatility_pct: number; // Annualized portfolio volatility %
-  sharpe_ratio: number; // Return / volatility (using 6% risk-free rate)
+  /**
+   * Excess return / volatility, both on a trailing 1-year horizon (6% risk-free).
+   * null when unmeasurable. This used to divide return-SINCE-PURCHASE by an
+   * ANNUALISED volatility, inflating a multi-year gain into a Sharpe of 4.56.
+   */
+  sharpe_ratio: number | null;
   max_drawdown_pct: number; // Worst peak-to-trough decline %
-  beta_vs_nifty: number; // Portfolio beta vs Nifty 50
+  /** null when too few holdings had overlapping history to measure it —
+   *  render as unavailable, never as 0 */
+  beta_vs_nifty: number | null;
   risk_score: number; // 0-100 (0=high risk, 100=low risk)
 }
 
@@ -22,11 +29,11 @@ export interface BenchmarkComparison {
   user_return_pct: number; // User's portfolio return %
   nifty50_return_pct: number; // Nifty 50 return %
   sensex_return_pct: number; // Sensex (BSE) return %
-  nifty_micro_cap_return_pct: number; // Nifty Micro Cap return %
+  nifty_midcap_return_pct: number; // Nifty Midcap 150 return %
   outperformance: {
     vs_nifty50: number; // User - Nifty (can be negative)
     vs_sensex: number;
-    vs_nifty_micro_cap: number;
+    vs_nifty_midcap: number;
   };
   /**
    * Percentile against other Ants users, or null when we can't compute one.
@@ -40,8 +47,14 @@ export interface BenchmarkComparison {
 export interface SectorMetrics {
   sector: string;
   holdings_count: number;
+  /** how many of those holdings we could actually price */
+  priced_count: number;
   weight_pct: number; // Portfolio weight %, computed from the live analysis
-  return_pct: number; // Money-weighted sector return, computed from holdings
+  /**
+   * Money-weighted return over the PRICED holdings only. null when none of the
+   * sector's holdings could be priced — render that as unavailable, never as 0.
+   */
+  return_pct: number | null;
   // volatility_pct removed: it came from a hardcoded sector table that was
   // missing most of the sector labels the backend emits, so it resolved to a
   // 22.0% constant for the majority of holdings. Real per-ticker volatility

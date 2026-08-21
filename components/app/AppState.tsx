@@ -3,14 +3,37 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Analysis } from "@/lib/analysis/types";
 import type { GamificationState, Achievement } from "@/lib/gamification/types";
-import { getLevelForXp, getStreakMultiplier, isNewDayForCheckIn, XP_REWARDS } from "@/lib/gamification/xpSystem";
+import { getLevelForXp, getStreakMultiplier, isNewDayForCheckIn, nextStreak, XP_REWARDS } from "@/lib/gamification/xpSystem";
 import { ACHIEVEMENT_DEFINITIONS } from "@/lib/gamification/achievements";
+import { recordActivity, undoActivity } from "@/lib/gamification/dailyActivity";
 
 const ANALYZED_KEY = "ants:portfolio-analyzed";
 const FIXES_KEY = "ants:done-fixes";
 const ANALYSIS_KEY = "ants:analysis";
 const IS_DEMO_KEY = "ants:analysis-is-demo";
 const GAMIFICATION_KEY = "ants:gamification";
+/** id → XP actually paid for that fix, so undo reverses the real amount */
+const FIX_XP_KEY = "ants:fix-xp";
+
+function readFixXpLedger(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(FIX_XP_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, number>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFixXpLedger(next: Record<string, number>): void {
+  try {
+    localStorage.setItem(FIX_XP_KEY, JSON.stringify(next));
+  } catch {
+    // ignore persistence failures
+  }
+}
 
 export interface XpEvent {
   id: number;
@@ -134,26 +157,56 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const setAnalysis = (value: Analysis | null, demo = false) => {
     setAnalysisState(value);
     setIsDemoState(demo);
+
+    // Fix ids are static engine constants ("single-concentration",
+    // "sector-concentration", …), not per-run. Carrying doneFixes across a
+    // re-analysis therefore marked a NEWLY raised flag as already sorted: the
+    // card rendered teal with a "Sorted" chip, its points were added to a score
+    // the engine never gave, the header claimed "You're on top of it" over an
+    // unaddressed red flag, and ScoreTrend wrote the inflated number into
+    // permanent history. A fresh analysis is a fresh verdict — if a flag is
+    // back, it is not fixed.
+    setDoneFixes([]);
     try {
       if (value) localStorage.setItem(ANALYSIS_KEY, JSON.stringify(value));
       else localStorage.removeItem(ANALYSIS_KEY);
       localStorage.setItem(IS_DEMO_KEY, demo ? "true" : "false");
+      localStorage.removeItem(FIXES_KEY);
+      localStorage.removeItem(FIX_XP_KEY);
     } catch {
       // ignore persistence failures
     }
   };
 
+  /**
+   * Marking a fix done owns its whole reward: the ledger entry, the daily
+   * activity signal, and the XP. These used to be three separate calls at the
+   * call site while undo reversed only the first, so ten mark/undo cycles paid
+   * ~250 XP and satisfied the "complete a fix" mission with nothing fixed.
+   * Keeping both directions here makes them impossible to desync.
+   */
   const markFixDone = (id: string) => {
-    setDoneFixes((prev) => {
-      if (prev.includes(id)) return prev;
-      const next = [...prev, id];
-      try {
-        localStorage.setItem(FIXES_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    if (doneFixes.includes(id)) return;
+
+    const next = [...doneFixes, id];
+    setDoneFixes(next);
+    try {
+      localStorage.setItem(FIXES_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+
+    // The streak multiplier can differ between marking and undoing, so record
+    // what was actually paid rather than recomputing it later and drifting.
+    const boosted = Math.round(
+      XP_REWARDS.FIX_COMPLETED * getStreakMultiplier(gamification.dailyStreak.current)
+    );
+    const ledger = readFixXpLedger();
+    ledger[id] = boosted;
+    writeFixXpLedger(ledger);
+
+    recordActivity("fix");
+    adjustXp(boosted, "Fix completed");
   };
 
   /**
@@ -164,16 +217,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
    * far less consequential act of removing a row.)
    */
   const unmarkFixDone = (id: string) => {
-    setDoneFixes((prev) => {
-      if (!prev.includes(id)) return prev;
-      const next = prev.filter((f) => f !== id);
-      try {
-        localStorage.setItem(FIXES_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    if (!doneFixes.includes(id)) return;
+
+    const next = doneFixes.filter((f) => f !== id);
+    setDoneFixes(next);
+    try {
+      localStorage.setItem(FIXES_KEY, JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+
+    const ledger = readFixXpLedger();
+    const paid = ledger[id];
+    delete ledger[id];
+    writeFixXpLedger(ledger);
+
+    undoActivity("fix");
+    // Fixes marked before this ledger existed have no recorded amount. Reverse
+    // nothing rather than guessing — an unearned deduction is worse than an
+    // un-reversed legacy award.
+    if (typeof paid === "number" && paid > 0) adjustXp(-paid, "Fix undone");
   };
 
   const setGamification = (updater: GamificationState | ((prev: GamificationState) => GamificationState)) => {
@@ -189,27 +252,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   const dailyCheckIn = () => {
+    // Decided BEFORE the updater so the toast can't disagree with the ledger.
+    // pushXpEvent used to run unconditionally while the updater returned `prev`
+    // unchanged for a repeat check-in, so a second tap inside the sheet's 1100ms
+    // dismissal window floated another "+15 XP" that was never awarded.
+    if (!isNewDayForCheckIn(gamification.lastCheckInDate)) return;
+
     setGamification((prev) => {
+      if (!isNewDayForCheckIn(prev.lastCheckInDate)) return prev;
+
       const today = new Date().toISOString();
-      const lastCheckIn = prev.lastCheckInDate;
-
-      // Check if it's a new day
-      if (!isNewDayForCheckIn(lastCheckIn)) {
-        return prev; // already checked in today
-      }
-
-      let newStreak = prev.dailyStreak.current;
-      const lastCheckDate = new Date(prev.dailyStreak.lastCheckInDate);
-      const today2 = new Date();
-
-      // Check if yesterday's check-in was within 24h (streak continues)
-      const hoursSinceLastCheckIn = (today2.getTime() - lastCheckDate.getTime()) / (1000 * 60 * 60);
-      if (hoursSinceLastCheckIn <= 48) {
-        newStreak = prev.dailyStreak.current + 1;
-      } else {
-        newStreak = 1; // streak broken, restart
-      }
-
+      const newStreak = nextStreak(prev.dailyStreak.current, prev.dailyStreak.lastCheckInDate);
       const newLongest = Math.max(prev.dailyStreak.longest, newStreak);
 
       return {
@@ -226,6 +279,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       };
     });
     pushXpEvent(XP_REWARDS.DAILY_CHECK_IN, "Daily check-in");
+  };
+
+  /**
+   * Apply an already-final XP delta — no streak multiplier, and it may be
+   * negative. earnXp boosts what it is given, so it cannot be used to reverse
+   * an award without re-boosting it. Totals floor at zero so a reversal can
+   * never drive the level below what the remaining XP supports.
+   */
+  const adjustXp = (delta: number, label?: string) => {
+    setGamification((prev) => {
+      const newTotalXp = Math.max(0, prev.totalXpEarned + delta);
+      return {
+        ...prev,
+        xp: Math.max(0, prev.xp + delta),
+        totalXpEarned: newTotalXp,
+        level: getLevelForXp(newTotalXp),
+      };
+    });
+    pushXpEvent(delta, label);
   };
 
   const earnXp = (amount: number, label?: string) => {
@@ -287,6 +359,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.removeItem(ANALYZED_KEY);
       localStorage.removeItem(FIXES_KEY);
+      localStorage.removeItem(FIX_XP_KEY);
       localStorage.removeItem(ANALYSIS_KEY);
       localStorage.removeItem(IS_DEMO_KEY);
       // ants:manual-positions is deliberately kept: it seeds the entry form so

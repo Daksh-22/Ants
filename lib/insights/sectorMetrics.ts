@@ -13,22 +13,40 @@ import type { SectorMetrics } from "@/lib/insights/types";
  * Sorted by portfolio weight, heaviest first.
  */
 export function computeSectorMetrics(holdings: AnalysisHolding[]): SectorMetrics[] {
-  const bySector = new Map<string, { value: number; invested: number; weight: number; count: number }>();
+  const bySector = new Map<
+    string,
+    { value: number; invested: number; weight: number; count: number; pricedCount: number }
+  >();
 
   for (const h of holdings) {
-    const entry = bySector.get(h.sector) ?? { value: 0, invested: 0, weight: 0, count: 0 };
-    entry.value += h.value;
-    entry.invested += h.invested;
+    const entry =
+      bySector.get(h.sector) ?? { value: 0, invested: 0, weight: 0, count: 0, pricedCount: 0 };
+
+    // Weight always counts the holding: it is real money in that sector
+    // regardless of whether we could price it.
     entry.weight += h.weightPct;
     entry.count += 1;
+
+    // The RETURN must not. An unpriced holding is held at the user's own
+    // average, so it contributes a fabricated exactly-0% leg that drags the
+    // money-weighted sector return toward zero. Pharma with one holding up 50%
+    // and one unpriced holding of equal size reported +25% — a number that
+    // described neither holding. /portfolio already badges these "No price";
+    // this screen was averaging them in as measured results.
+    if (h.priceSource !== "unpriced") {
+      entry.value += h.value;
+      entry.invested += h.invested;
+      entry.pricedCount += 1;
+    }
     bySector.set(h.sector, entry);
   }
 
   const metrics: SectorMetrics[] = [...bySector.entries()].map(([sector, e]) => ({
     sector,
     holdings_count: e.count,
+    priced_count: e.pricedCount,
     weight_pct: e.weight,
-    return_pct: e.invested > 0 ? ((e.value - e.invested) / e.invested) * 100 : 0,
+    return_pct: e.invested > 0 ? ((e.value - e.invested) / e.invested) * 100 : null,
   }));
 
   return metrics.sort((a, b) => b.weight_pct - a.weight_pct);

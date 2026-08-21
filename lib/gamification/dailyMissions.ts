@@ -21,7 +21,14 @@ export interface MissionContext {
   gamification: GamificationState;
 }
 
-const todayStr = () => new Date().toDateString();
+/**
+ * The local-day key everything here agrees on. Exported so the UI can detect a
+ * rollover using the SAME definition that loadClaims/saveClaims stamp with —
+ * the midnight double-pay bug came from two places disagreeing about "today".
+ */
+export const missionDayKey = (now = new Date()) => now.toDateString();
+
+const todayStr = () => missionDayKey();
 
 export const MISSION_POOL: MissionDef[] = [
   {

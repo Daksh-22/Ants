@@ -41,6 +41,15 @@ export function BottomNav() {
   const visible = !onHome || analyzed;
   if (!visible) return null;
 
+  // LAYERING: this dock is z-50 and `.nav-fade` paints an OPAQUE bottom
+  // gradient. /home's full-screen takeovers — the entry/edit form, Processing,
+  // the failure screen, the hydration splash — used to sit at z-40, BELOW it.
+  // So once an analysis existed, `visible` stayed true and the dock plus its
+  // ~90px band were drawn over the bottom of the edit form: it hid the "Stays on
+  // your device" line, clipped the "Analyze N positions" button, and, sitting
+  // higher, swallowed taps aimed at it. Those surfaces are now z-[55]. Any new
+  // full-screen surface must also sit above z-50.
+
   return (
     <motion.nav
       initial={{ y: 90, opacity: 0 }}

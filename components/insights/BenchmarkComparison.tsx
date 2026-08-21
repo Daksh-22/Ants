@@ -17,12 +17,12 @@ interface BenchmarkComparisonProps {
 function benchmarkCopy(b: BenchmarkComparisonType): string {
   const beatsNifty = b.outperformance.vs_nifty50 > 0;
   const beatsSensex = b.outperformance.vs_sensex > 0;
-  const beatsMicro = b.outperformance.vs_nifty_micro_cap > 0;
+  const beatsMidcap = b.outperformance.vs_nifty_midcap > 0;
 
-  if (beatsNifty && beatsSensex && beatsMicro)
+  if (beatsNifty && beatsSensex && beatsMidcap)
     return "You're ahead of all three benchmarks. That's genuinely rare — most portfolios (and most fund managers) don't manage it. Don't get cocky, but do take the W.";
   if (beatsNifty && beatsSensex)
-    return "Ahead of the big indices, behind micro caps. Micro caps ran hot this year — chasing them now usually means buying the top.";
+    return "Ahead of the large-cap indices, behind mid caps. Mid caps ran hot this year — chasing them now usually means buying the top.";
   if (beatsNifty)
     return "You're beating Nifty 50 — your picks are earning their place. The Sensex gap is small enough to be noise.";
   return "The index is beating you right now. Worth asking: would a plain Nifty 50 index fund be doing this job better? That question is the whole point of this screen.";
@@ -39,7 +39,7 @@ export function BenchmarkComparison({ benchmarks, index = 0 }: BenchmarkComparis
     { label: "Your portfolio", value: benchmarks.user_return_pct, you: true },
     { label: "Nifty 50", value: benchmarks.nifty50_return_pct, you: false },
     { label: "Sensex", value: benchmarks.sensex_return_pct, you: false },
-    { label: "Nifty Micro Cap", value: benchmarks.nifty_micro_cap_return_pct, you: false },
+    { label: "Nifty Midcap 150", value: benchmarks.nifty_midcap_return_pct, you: false },
   ];
   const maxAbs = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
 
@@ -51,7 +51,7 @@ export function BenchmarkComparison({ benchmarks, index = 0 }: BenchmarkComparis
   const beatsAll =
     benchmarks.outperformance.vs_nifty50 > 0 &&
     benchmarks.outperformance.vs_sensex > 0 &&
-    benchmarks.outperformance.vs_nifty_micro_cap > 0;
+    benchmarks.outperformance.vs_nifty_midcap > 0;
 
   return (
     <Reveal index={index}>

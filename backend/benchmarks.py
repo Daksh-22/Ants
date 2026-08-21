@@ -26,6 +26,9 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # Index returns move slowly; an hour-old number is honest, a fabricated one never is.
 TTL_SECONDS = 60 * 60
+# A partial read is served but expires quickly, so the missing index is retried
+# on the next request rather than an hour later.
+PARTIAL_TTL_SECONDS = 90
 FETCH_DEADLINE_SECONDS = float(os.environ.get("BENCHMARK_DEADLINE_SECONDS", "10"))
 
 # key -> (display label, Yahoo symbol)
@@ -100,8 +103,13 @@ def get_benchmarks(force: bool = False) -> dict[str, Any]:
         "note": None if resolved else "Live index data is unavailable right now.",
     }
 
-    # Only cache a good read. Caching an empty result would pin the UI to
-    # "unavailable" for a full hour after one flaky fetch.
-    if resolved:
+    # Only cache a COMPLETE read for the full hour. Caching any non-empty
+    # result meant a partial fetch — say Sensex resolved but Nifty timed out —
+    # was pinned as authoritative with available: True, so the Nifty row simply
+    # vanished from the comparison for an hour instead of being retried. A
+    # partial read is still worth serving, just not worth remembering for long.
+    if len(resolved) == len(INDEXES):
         _cache, _cached_at = payload, now
+    elif resolved:
+        _cache, _cached_at = payload, now - TTL_SECONDS + PARTIAL_TTL_SECONDS
     return payload

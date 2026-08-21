@@ -1,186 +1,232 @@
 # Ants Deployment Guide
 
-## Prerequisites
-- Anthropic API Key: `sk-ant-api03-YOUR_API_KEY_HERE`
-- Vercel account (for frontend)
-- Render account (for backend)
+The one accurate deploy path. `QUICK_START.md` is the short version of this
+file; the older `DEPLOY_NOW.md`, `START_HERE.md`, `NEXT_STEPS.txt` and
+`DEPLOYMENT.md` predate the current backend and disagree with it — trust this
+file over those.
+
+Two services:
+
+| Part     | Host   | Config source            |
+| -------- | ------ | ------------------------ |
+| Frontend | Vercel | Vercel dashboard env     |
+| Backend  | Render | `render.yaml` (Docker)   |
 
 ---
 
-## Step 1: Deploy Backend on Render
+## Before you start: three secrets
 
-### 1a. Go to Render Dashboard
-- Visit https://dashboard.render.com
-- Click **New** → **Web Service**
+You need these in hand. None belong in git.
 
-### 1b. Configure the Service
-- **Name**: `ants-backend`
-- **Root Directory**: `backend`
-- **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- **Runtime**: Python 3
-- **Plan**: Free (sufficient for testing)
+1. **`ANTHROPIC_API_KEY`** — from https://console.anthropic.com.
+   The key currently in `backend/.env` returns **401 (invalid)**; it has to be
+   replaced, not reused. Verify a new one before deploying:
 
-### 1c. Set Environment Variables (IMPORTANT!)
-After creating the service, go to **Settings** → **Environment**
+   ```bash
+   curl -s https://api.anthropic.com/v1/messages -H "x-api-key: PASTE_KEY_HERE" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" -d '{"model":"claude-opus-5","max_tokens":4,"messages":[{"role":"user","content":"hi"}]}'
+   ```
 
-Add these variables:
-```
-ANTHROPIC_API_KEY = sk-ant-api03-YOUR_API_KEY_HERE
-ANTHROPIC_MODEL = claude-opus-4-8
-ENVIRONMENT = production
-JWT_SECRET = prod-secret-key-change-this-later
-ALLOWED_ORIGINS = https://ants-delta.vercel.app,https://ants.vercel.app
-```
+   A JSON reply with `"content"` means the key is good. `"authentication_error"`
+   means it is still wrong — fix that before touching Render.
 
-### 1d. Deploy
-- Click **Deploy**
-- Wait 5-10 minutes
-- You'll get a URL like: `https://ants-backend-xxx.onrender.com`
-- **Save this URL** ← You need it for the next step
+2. **`JWT_SECRET`** — this signs every user's login token. Earlier drafts of
+   this guide said to use `prod-secret`, which would let anyone who has read the
+   repo mint a token for any account. Generate a real one:
 
-### 1e. Test the Backend
-Once deployed, test it with:
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+
+3. **`SUPABASE_URL` + `SUPABASE_KEY`** — from your Supabase project settings.
+   Without them the app still runs, but signup, login and saved portfolios stay
+   disabled (`/healthz` reports `"accountsEnabled": false`).
+
+---
+
+## Step 1 — Deploy the backend to Render
+
+The repo has a `render.yaml`, so use a **Blueprint**, not a manual Web Service.
+This matters: the backend shells out to the `tesseract` binary for the free OCR
+fallback, and only `backend/Dockerfile` installs it. A manual "Python 3" service
+with `pip install -r requirements.txt` builds fine and then fails at runtime the
+first time someone uploads a screenshot without AI vision available.
+
+1. Push this branch first — Render reads `render.yaml` from the repo:
+
+   ```bash
+   git push origin main
+   ```
+
+2. Go to https://dashboard.render.com → **New** → **Blueprint**.
+3. Pick the `Daksh-22/Ants` repo. Render detects `render.yaml` and proposes one
+   service, `ants-backend`.
+4. It will prompt for the four variables marked `sync: false`. Paste them:
+
+   | Variable            | Value                                   |
+   | ------------------- | --------------------------------------- |
+   | `ANTHROPIC_API_KEY` | your new, verified key                  |
+   | `JWT_SECRET`        | the generated string from above         |
+   | `SUPABASE_URL`      | from Supabase                           |
+   | `SUPABASE_KEY`      | from Supabase                           |
+
+   `ALLOWED_ORIGINS` and `ENVIRONMENT` are already set in `render.yaml`.
+
+5. Click **Apply**. First build takes 5–10 minutes (it installs tesseract).
+6. Copy the service URL, e.g. `https://ants-backend-xxxx.onrender.com`.
+
+### Confirm it actually came up
+
 ```bash
-curl https://ants-backend-xxx.onrender.com/healthz
+curl -s https://ants-backend-xxxx.onrender.com/healthz
 ```
 
-Should return:
+Read the reply carefully — this endpoint is the whole diagnostic surface:
+
 ```json
-{"status": "ok", "aiEnabled": true, "knowledgeChunks": 24}
+{
+  "status": "ok",
+  "aiEnabled": true,
+  "aiModel": "claude-opus-5",
+  "aiLastError": null,
+  "knowledgeChunks": 24,
+  "accountsEnabled": true,
+  "brokerLinkEnabled": false,
+  "executionEnabled": false
+}
+```
+
+- `aiEnabled: false` → `ANTHROPIC_API_KEY` never reached the service.
+- `aiLastError` non-null → the key **is** set but the API rejected it. The
+  message says whether that was a bad key (401), an unknown model, or a rate
+  limit. This is the field that tells the invalid-key case apart from the
+  not-configured case; check it before regenerating anything.
+- `accountsEnabled: false` → Supabase vars missing. Expected if you skipped them.
+- `brokerLinkEnabled` / `executionEnabled` are `false` on purpose. Broker
+  linking and order execution are not implemented and return 503 rather than
+  inventing data.
+
+Then confirm the analysis engine returns real math:
+
+```bash
+curl -s -X POST https://ants-backend-xxxx.onrender.com/api/analyze -H "Content-Type: application/json" -d '{"positions":[{"ticker":"TCS","qty":10,"avg":3500},{"ticker":"INFY","qty":5,"avg":2100}],"source":"manual"}'
 ```
 
 ---
 
-## Step 2: Update Frontend API URL
+## Step 2 — Point the frontend at it
 
-### 2a. Update Environment Variable
-In your code, the file `.env.local` already points to `http://localhost:8000`.
+`NEXT_PUBLIC_API_URL` is inlined into the JavaScript bundle **at build time**,
+not read at runtime. Setting the variable without rebuilding changes nothing —
+this is the single most common way this step silently fails.
 
-For production on Vercel, you need to set it in the Vercel dashboard:
-
-1. Go to https://vercel.com
-2. Select your "Ants" project
-3. Go to **Settings** → **Environment Variables**
-4. Add a new variable:
+1. https://vercel.com → your **Ants** project → **Settings** → **Environment Variables**.
+2. Add:
    - **Name**: `NEXT_PUBLIC_API_URL`
-   - **Value**: `https://ants-backend-xxx.onrender.com` (replace xxx with your actual Render service name)
-   - **Environments**: Production, Preview, Development (select all)
-5. Click **Save**
+   - **Value**: `https://ants-backend-xxxx.onrender.com` — no trailing slash
+   - **Environments**: Production, Preview, Development
+3. **Save**.
+4. **Deployments** → latest → ⋯ → **Redeploy**. Without this the old bundle,
+   with the old value baked in, keeps serving.
 
-### 2b. Redeploy Frontend
-- Go back to **Deployments**
-- Click **Redeploy** on the latest deployment
-- Wait for it to finish (should be 1-2 minutes)
+If you forget, the app now says so out loud instead of failing as a generic
+network error: it detects a page served from a real host whose API base is
+loopback and reports that `NEXT_PUBLIC_API_URL` is unset or still local.
 
 ---
 
-## Step 3: Verify Everything Works
+## Step 3 — Verify end to end
 
-### 3a. Test Backend API Directly
+1. Open https://ants-delta.vercel.app.
+2. Upload a broker screenshot.
+3. Expect: extracted holdings shown **for review and editing** before any
+   analysis runs — that confirmation step is deliberate, because the free
+   tesseract path is materially less accurate than AI vision.
+4. Correct anything misread, then run the analysis.
+5. Run a second, different portfolio and confirm the output differs.
+
+Open the browser console and confirm there are no CORS errors. If there are,
+`ALLOWED_ORIGINS` on Render does not include the exact origin you are browsing
+from — including a Vercel preview URL, which differs per deployment.
+
+---
+
+## Local development
+
+`backend/main.py` loads `backend/.env.local`, then `backend/.env`, and neither
+overrides a variable already present in the real process environment. So a local
+file is enough for dev, and the hosting dashboard still wins in production. You
+no longer need to `export` anything by hand.
+
 ```bash
-curl -X POST https://ants-backend-xxx.onrender.com/api/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "positions": [
-      {"ticker": "TCS", "qty": 10, "avg": 3500},
-      {"ticker": "INFY", "qty": 5, "avg": 2100}
-    ]
-  }'
-```
-
-Should return real analysis with flags and fixes.
-
-### 3b. Test Frontend
-1. Go to your Vercel frontend URL (e.g., `https://ants-delta.vercel.app`)
-2. You should see the portfolio analysis page
-3. Click **"Scan a different portfolio"**
-4. Upload a screenshot of any Indian broker portfolio
-5. System should:
-   - Extract holdings from the screenshot using Claude vision
-   - Show the extracted holdings for review
-   - Run analysis on those holdings
-   - Display **unique analysis** (not generic demo data)
-
----
-
-## Step 4: What's Different Now?
-
-### Before (Broken)
-- Frontend always showed the same demo analysis
-- Every screenshot upload returned generic data
-- Backend wasn't running
-
-### After (Fixed)
-- Screenshot → Claude OCR extracts holdings
-- Holdings sent to real analysis engine
-- Returns **genuine, portfolio-specific feedback**
-- Different portfolios get different analysis
-- AI polishes the copy in the "Ants voice"
-
----
-
-## Common Issues & Fixes
-
-### Issue: Backend returns `"aiEnabled": false`
-- **Cause**: API key not set
-- **Fix**: Go to Render dashboard → Settings → Environment → Add `ANTHROPIC_API_KEY`
-
-### Issue: Frontend still showing demo analysis
-- **Cause**: Frontend URL not pointing to backend
-- **Fix**: Check Vercel Environment Variables → `NEXT_PUBLIC_API_URL` is correct
-
-### Issue: CORS errors in browser console
-- **Cause**: Frontend URL not in `ALLOWED_ORIGINS`
-- **Fix**: Go to Render backend → Settings → Environment → Update `ALLOWED_ORIGINS` to include your Vercel URL
-
-### Issue: Uploads fail / "Could not reach backend"
-- **Cause**: Render backend URL is wrong or service is down
-- **Fix**: Test backend with curl command above; check Render dashboard for errors
-
----
-
-## Local Development (For Testing)
-
-To run locally:
-
-### Terminal 1: Backend
-```bash
+# Terminal 1 — backend
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# Set the API key (MacOS/Linux)
-export ANTHROPIC_API_KEY="sk-ant-api03-YOUR_API_KEY_HERE"
-
 uvicorn main:app --reload --port 8000
 ```
 
-### Terminal 2: Frontend
+The service refuses to boot without `JWT_SECRET` — deliberately, so a missing
+signing key fails loudly at startup instead of quietly at the first login. Put
+it in `backend/.env`.
+
 ```bash
+# Terminal 2 — frontend
 npm run dev
 ```
 
-Then visit http://localhost:3000
+Then http://localhost:3000. Root `.env.local` already points at
+`http://localhost:8000`; leave it that way. Production reads Vercel's value, not
+this file.
+
+Note: `tesseract` must be on your PATH for the free OCR fallback locally
+(`brew install tesseract`). Docker handles it in deployment.
 
 ---
 
-## Security Notes
+## Security checklist
 
-1. **NEVER commit API key to git** ✅ Already doing this (set in environment)
-2. **Regenerate the API key after this deployment** - You shared it in chat
-3. **Set API key spending limits** on console.anthropic.com
-4. **Use different secrets for production** - Change `JWT_SECRET` in Render
+> **The previous key was published and is already dead.** A real
+> `ANTHROPIC_API_KEY` was committed in `819558a3` ("Add deployment and quick
+> start guides") inside `DEPLOYMENT_GUIDE.md` and `QUICK_START.md`. `c7d2845`
+> replaced it with a placeholder in the working tree, but a later commit does
+> not remove a value from history — and both commits are on `origin/main` at
+> `github.com/Daksh-22/Ants`, which is **public**.
+>
+> That is the most likely explanation for the 401: GitHub secret scanning
+> reports leaked Anthropic keys to Anthropic, which revokes them. The key did
+> not expire or break; it was published and killed.
+>
+> Consequences to act on:
+> - Treat that key as compromised regardless of its current status. Revoke it
+>   explicitly rather than assuming the auto-revoke covered it.
+> - The new key must never enter a tracked file. It belongs only in the Render
+>   dashboard and, locally, in the gitignored `backend/.env`.
+> - Scrubbing history (`git filter-repo`, or GitHub support for cached views)
+>   is optional here **only because the key is already dead**. Do it if you
+>   want the repo clean; it is not what protects you. Revocation is.
+
+- [ ] Old `ANTHROPIC_API_KEY` **revoked** at console.anthropic.com, not just replaced.
+- [ ] Spending limit set on the new key.
+- [ ] `JWT_SECRET` is a generated random string, unique to production.
+- [ ] `backend/.env` is gitignored (it is) and excluded from the Docker image
+      via `backend/.dockerignore` (it is) — otherwise the key ships inside an
+      image layer, where rotating it in the dashboard does not remove it.
+- [ ] Supabase key is the anon/public key, not the service-role key.
 
 ---
 
-## Next Steps
+## Known limitations
 
-1. [ ] Deploy backend to Render (follow Step 1)
-2. [ ] Update Vercel environment (follow Step 2)
-3. [ ] Test the APIs (follow Step 3)
-4. [ ] Upload a real screenshot to verify end-to-end
-5. [ ] Share with friends to get feedback
+State these plainly rather than letting a user discover them:
 
-Done! Your app is now fully functional. ✨
+- **Price alerts do not fire on live price moves.** They are evaluated in the
+  browser against the prices from your last analysis, so an alert only resolves
+  when you reopen the app and re-run it. Real alerting needs a server-side
+  price watcher plus push delivery — unbuilt. The UI labels price age
+  ("Prices from 3h ago") and offers Refresh so this is visible, not hidden.
+- **Prices are not streamed.** A stored analysis keeps the quotes it was built
+  with until re-run.
+- **Broker linking and order execution are not implemented** and return 503.
+- **Risk metrics cover only holdings with enough price history.** The response
+  carries a `coveragePct`; a portfolio of recent listings yields little.

@@ -7,9 +7,10 @@ summary, health score, red/amber flags (each with an actionable fix), what's
 working, and next moves. The copy here is the deterministic fallback voice;
 ai.polish_analysis() punches it up with Claude when a key is configured.
 
-Prices are a static reference snapshot (documented, easily swapped for a live
-quotes API). Unknown tickers price flat at their avg — honest about what we
-don't know rather than inventing a return.
+Prices come from quotes.py (live, from Yahoo). Anything it cannot resolve is
+marked unpriced and held flat at the user's own average, so a 0% return means
+"we don't know" and never "flat". There is deliberately no stale-snapshot
+pricing tier — see the note on KNOWN_STOCKS.
 """
 
 from __future__ import annotations
@@ -17,44 +18,55 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any, Optional
 
-# ticker -> (display name, sector, reference CMP ₹)
-KNOWN_STOCKS: dict[str, tuple[str, str, float]] = {
-    "TCS": ("TCS", "IT", 4127.0),
-    "INFY": ("Infosys", "IT", 1612.0),
-    "INFOSYS": ("Infosys", "IT", 1612.0),
-    "WIPRO": ("Wipro", "IT", 545.0),
-    "HCLTECH": ("HCL Tech", "IT", 1710.0),
-    "HDFCBANK": ("HDFC Bank", "Banking", 1628.0),
-    "HDFC": ("HDFC Bank", "Banking", 1628.0),
-    "ICICIBANK": ("ICICI Bank", "Banking", 1145.0),
-    "SBIN": ("SBI", "Banking", 815.0),
-    "KOTAKBANK": ("Kotak Bank", "Banking", 1790.0),
-    "BAJFINANCE": ("Bajaj Finance", "NBFC", 6890.0),
-    "RELIANCE": ("Reliance", "Energy", 2943.0),
-    "ONGC": ("ONGC", "Energy", 267.0),
-    "TATAPOWER": ("Tata Power", "Power", 437.0),
-    "NTPC": ("NTPC", "Power", 362.0),
-    "DIXON": ("Dixon Technologies", "Electronics", 14340.0),
-    "KAYNES": ("Kaynes Technology", "Electronics", 4120.0),
-    "SYRMA": ("Syrma SGS", "Electronics", 512.0),
-    "HAL": ("HAL", "Defense", 4510.0),
-    "BEL": ("Bharat Electronics", "Defense", 297.0),
-    "RVNL": ("RVNL", "Railways", 415.0),
-    "IRFC": ("IRFC", "Railways", 142.0),
-    "TATAMOTORS": ("Tata Motors", "Auto", 985.0),
-    "M&M": ("Mahindra & Mahindra", "Auto", 2870.0),
-    "MARUTI": ("Maruti Suzuki", "Auto", 12400.0),
-    "ITC": ("ITC", "FMCG", 465.0),
-    "HINDUNILVR": ("HUL", "FMCG", 2380.0),
-    "SUNPHARMA": ("Sun Pharma", "Pharma", 1710.0),
-    "CIPLA": ("Cipla", "Pharma", 1520.0),
-    "ZOMATO": ("Zomato", "Consumer Tech", 265.0),
-    "PAYTM": ("Paytm", "Consumer Tech", 415.0),
-    "ADANIENT": ("Adani Enterprises", "Conglomerate", 3120.0),
-    "MIRAEFANG": ("Mirae FANG+ ETF", "International ETF", 94.0),
-    "FANG": ("Mirae FANG+ ETF", "International ETF", 94.0),
-    "MON100": ("Motilal Nasdaq 100 ETF", "International ETF", 172.0),
-    "NIFTYBEES": ("Nifty BeES", "Index ETF", 285.0),
+# ticker -> (display name, sector)
+#
+# Metadata ONLY. This table used to carry a third element, a hardcoded "reference
+# CMP", used to price any holding the live fetch missed. That snapshot went ~2
+# years stale: RELIANCE sat at 2943 against a live ~1329, TCS at 4127 against
+# ~2349. A position was then valued and its return computed off that number and
+# returned with priceSource "reference" and known: true — and the frontend only
+# ever branched on "unpriced", so a holding genuinely down 21.7% rendered as up
+# 37.6% with nothing marking it. The prices are gone rather than refreshed: a
+# hand-maintained price table cannot help going stale, and a confidently wrong
+# valuation is worse than an admitted missing one. Names and sectors don't drift,
+# so those stay.
+KNOWN_STOCKS: dict[str, tuple[str, str]] = {
+    "TCS": ("TCS", "IT"),
+    "INFY": ("Infosys", "IT"),
+    "INFOSYS": ("Infosys", "IT"),
+    "WIPRO": ("Wipro", "IT"),
+    "HCLTECH": ("HCL Tech", "IT"),
+    "HDFCBANK": ("HDFC Bank", "Banking"),
+    "HDFC": ("HDFC Bank", "Banking"),
+    "ICICIBANK": ("ICICI Bank", "Banking"),
+    "SBIN": ("SBI", "Banking"),
+    "KOTAKBANK": ("Kotak Bank", "Banking"),
+    "BAJFINANCE": ("Bajaj Finance", "NBFC"),
+    "RELIANCE": ("Reliance", "Energy"),
+    "ONGC": ("ONGC", "Energy"),
+    "TATAPOWER": ("Tata Power", "Power"),
+    "NTPC": ("NTPC", "Power"),
+    "DIXON": ("Dixon Technologies", "Electronics"),
+    "KAYNES": ("Kaynes Technology", "Electronics"),
+    "SYRMA": ("Syrma SGS", "Electronics"),
+    "HAL": ("HAL", "Defense"),
+    "BEL": ("Bharat Electronics", "Defense"),
+    "RVNL": ("RVNL", "Railways"),
+    "IRFC": ("IRFC", "Railways"),
+    "TATAMOTORS": ("Tata Motors", "Auto"),
+    "M&M": ("Mahindra & Mahindra", "Auto"),
+    "MARUTI": ("Maruti Suzuki", "Auto"),
+    "ITC": ("ITC", "FMCG"),
+    "HINDUNILVR": ("HUL", "FMCG"),
+    "SUNPHARMA": ("Sun Pharma", "Pharma"),
+    "CIPLA": ("Cipla", "Pharma"),
+    "ZOMATO": ("Zomato", "Consumer Tech"),
+    "PAYTM": ("Paytm", "Consumer Tech"),
+    "ADANIENT": ("Adani Enterprises", "Conglomerate"),
+    "MIRAEFANG": ("Mirae FANG+ ETF", "International ETF"),
+    "FANG": ("Mirae FANG+ ETF", "International ETF"),
+    "MON100": ("Motilal Nasdaq 100 ETF", "International ETF"),
+    "NIFTYBEES": ("Nifty BeES", "Index ETF"),
 }
 
 INTERNATIONAL_SECTORS = {"International ETF"}
@@ -94,16 +106,21 @@ def price_position(
     quote: Any | None = None,
 ) -> dict[str, Any]:
     """Price one position. `quote` is an optional quotes.Quote resolved live;
-    without it we fall back to the static KNOWN_STOCKS snapshot, and without
-    that to the user's own avg (a flat 0% — honest about not knowing)."""
+    without one the position is marked unpriced and held at the user's own avg,
+    so its 0% return reads as "we don't know" and the UI can say so."""
     key = _norm(ticker)
 
     if quote is not None:
         name, sector, cmp_ = quote.name, quote.sector, float(quote.price)
         price_source = quote.source
     else:
-        name, sector, cmp_ = KNOWN_STOCKS.get(key, (ticker.strip() or key, "Other", avg))
-        price_source = "reference" if key in KNOWN_STOCKS else "unpriced"
+        # No live quote. The curated table still supplies a real name and sector,
+        # but it no longer carries a price, so this position is unpriced: valued
+        # at the user's own average and labelled as such. It is NOT "reference"
+        # priced — that tier is gone.
+        name, sector = KNOWN_STOCKS.get(key, (ticker.strip() or key, "Other"))
+        cmp_ = avg
+        price_source = "unpriced"
 
     if cmp_ <= 0:
         # No usable price. Fall back to the user's own average so the position
@@ -127,7 +144,8 @@ def price_position(
         "invested": round(invested, 2),
         "returnPct": round(ret, 1),
         "known": price_source != "unpriced",
-        # live | reference | unpriced — the UI tells the user which it got
+        # live | unpriced — the UI tells the user which it got. "reference" was
+        # a third state backed by the stale snapshot above; it no longer exists.
         "priceSource": price_source,
     }
 
@@ -326,7 +344,11 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
     if len(holdings) >= 3:
         top_ret = holdings[0]["returnPct"]
         rets = sorted(h["returnPct"] for h in holdings)
-        median_ret = rets[len(rets) // 2]
+        # True median. rets[len//2] is the upper-middle element on an
+        # even-length book, and this number is quoted verbatim to the user
+        # ("your median pick sits at ..."), so it has to be the real one.
+        mid = len(rets) // 2
+        median_ret = rets[mid] if len(rets) % 2 else (rets[mid - 1] + rets[mid]) / 2
         if top_ret - median_ret > 25 and top_ret > 15:
             working.append({
                 "id": "one-man-army",
@@ -383,14 +405,20 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
     unpriced = [h["ticker"] for h in holdings if h["priceSource"] == "unpriced"]
     if live_count == len(holdings):
         pricing_note = None
-    elif unpriced:
+    elif not live_count:
+        # Every lookup missed — usually Yahoo throttling or the fetch deadline.
+        # Say so at the top, because in this state every return on the screen is
+        # 0% and the total is just what the user paid.
+        pricing_note = (
+            "We couldn't reach live prices just now, so every holding is shown at "
+            "your own buy price and all returns read 0%. Refresh in a minute."
+        )
+    else:
         pricing_note = (
             f"Couldn't find a live price for {', '.join(unpriced[:3])}"
             + (f" +{len(unpriced) - 3} more" if len(unpriced) > 3 else "")
             + " — those show 0% return, so the totals understate reality."
         )
-    else:
-        pricing_note = "Some prices came from our reference snapshot, not live quotes."
 
     return {
         "source": source,
@@ -465,7 +493,10 @@ def check_ticker(analysis: dict[str, Any], ticker: str) -> dict[str, Any]:
     except Exception:
         pass
     if not known and key in KNOWN_STOCKS:
-        name, sector, cmp_ = KNOWN_STOCKS[key]
+        # We recognise the company well enough to reason about sector weight,
+        # but we have no price for it. cmp_ stays 0, which the reply renders as
+        # a null CMP rather than a stale one.
+        name, sector = KNOWN_STOCKS[key]
         known = True
 
     # Canonicalize: find all holdings of the same company by matching to the display name

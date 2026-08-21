@@ -1,0 +1,42 @@
+# ── Docker build context excludes ───────────────────────────────────────────
+# The Dockerfile does `COPY . .`, so anything not excluded here is baked into
+# an image layer. Two things made that actively harmful:
+#
+#   1. .env holds a real ANTHROPIC_API_KEY. Copying it into the image ships the
+#      secret to the registry, where it survives `docker run -e` overrides and
+#      any later key rotation in the hosting dashboard. Secrets belong in the
+#      platform's env config, never in a layer.
+#   2. venv/ is ~228 MB of Python 3.14 packages. The image is python:3.12-slim
+#      and reinstalls from requirements.txt anyway, so this was pure upload —
+#      slow builds on a free-tier plan, for bytes that are never read.
+
+# Secrets — provided at runtime by Render/Railway env config
+.env
+.env.*
+!.env.example
+
+# Local virtualenvs (image installs from requirements.txt)
+venv/
+.venv/
+env/
+
+# Python bytecode — wrong interpreter version for this base image
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local databases and scratch state
+*.db
+*.sqlite
+*.sqlite3
+
+# Docs and deploy manifests — not needed at runtime
+BACKEND_SETUP.md
+railway.json
+
+# OS / editor noise
+.DS_Store
+*.swp

@@ -57,12 +57,28 @@ export function useCountUp(target: number, duration = 1200, onComplete?: () => v
     const from = valueRef.current;
     let start: number | null = null;
 
+    // The rAF path and the safety timeout both called onComplete, and the
+    // timeout was never cancelled on normal completion — so every successful
+    // animation fired it twice, 250ms apart. In AnimatedNumber that re-ran the
+    // settle pop after it had finished and left a second uncancelled timer, so
+    // each hero figure visibly double-blipped.
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      onCompleteRef.current?.();
+    };
+
     const tick = (now: number) => {
       if (start === null) start = now;
       const t = Math.min((now - start) / duration, 1);
       setValue(from + (target - from) * easeOutCubic(t));
       if (t < 1) rafRef.current = requestAnimationFrame(tick);
-      else onCompleteRef.current?.();
+      else settle();
     };
 
     rafRef.current = requestAnimationFrame(tick);
@@ -72,7 +88,7 @@ export function useCountUp(target: number, duration = 1200, onComplete?: () => v
     // animation leaves a number the user reads as real but isn't.
     timeoutRef.current = setTimeout(() => {
       setValue(target);
-      onCompleteRef.current?.();
+      settle();
     }, duration + 250);
 
     return () => {

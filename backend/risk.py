@@ -58,6 +58,10 @@ class TickerRisk:
     beta: Optional[float]
     #  worst peak-to-trough over the window, % (negative)
     max_drawdown_pct: float
+    #  price return across the whole HISTORY_PERIOD window (1y), %. Exists so
+    #  Sharpe can divide a 1-year return by a 1-year volatility; the holdings
+    #  summary only knows return-since-purchase, which is a different horizon.
+    period_return_pct: float
     #  how many daily bars backed the calculation — the UI can hedge on thin data
     bars: int
 
@@ -167,11 +171,15 @@ def _fetch_one(key: str, bench: dict[str, float]) -> Optional[TickerRisk]:
                 cov = sum((a[i] - ma) * (b[i] - mb) for i in range(n)) / (n - 1)
                 beta = round(cov / var_b, 2)
 
+    closes = [c for _, c in series]
+    period_return = ((closes[-1] / closes[0] - 1) * 100) if closes[0] > 0 else 0.0
+
     risk = TickerRisk(
         ticker=key,
         volatility_pct=round(vol, 1),
         beta=beta,
-        max_drawdown_pct=round(_max_drawdown([c for _, c in series]), 1),
+        max_drawdown_pct=round(_max_drawdown(closes), 1),
+        period_return_pct=round(period_return, 1),
         bars=len(series),
     )
     _cache[key] = (risk, now)
@@ -191,8 +199,9 @@ def resolve_risk(tickers: Iterable[str]) -> dict[str, TickerRisk]:
     bench = _benchmark_returns()
     out: dict[str, TickerRisk] = {}
     try:
-        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(keys))) as pool:
-            futures = {pool.submit(_fetch_one, k, bench): k for k in keys}
+        pool = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(keys)))
+        futures = {pool.submit(_fetch_one, k, bench): k for k in keys}
+        try:
             for fut in as_completed(futures, timeout=FETCH_DEADLINE_SECONDS):
                 try:
                     r = fut.result(timeout=1)
@@ -200,6 +209,16 @@ def resolve_risk(tickers: Iterable[str]) -> dict[str, TickerRisk]:
                     r = None
                 if r:
                     out[r.ticker] = r
+        finally:
+            # FETCH_DEADLINE_SECONDS was advisory only. `with ThreadPoolExecutor`
+            # exits via shutdown(wait=True), which waits for every QUEUED task to
+            # run to completion — so a 60-ticker book still performed all 60
+            # yfinance fetches after the deadline had passed, holding the worker
+            # long past the budget. Cancel what hasn't started, then don't wait on
+            # what has.
+            for fut in futures:
+                fut.cancel()
+            pool.shutdown(wait=False)
     except Exception:
         pass  # deadline hit — partial results are fine, absent keys stay unknown
     return out
@@ -211,8 +230,12 @@ def portfolio_risk(holdings: list[dict], risks: dict[str, TickerRisk]) -> dict:
     Returns coverage alongside the numbers so the UI can say how much of the
     book the figure actually covers instead of implying it covers all of it.
     """
-    weighted_vol_sq = 0.0
+    sum_w_sigma = 0.0        # Σ wᵢσᵢ
+    sum_w2_sigma2 = 0.0      # Σ wᵢ²σᵢ²
     weighted_beta = 0.0
+    beta_weight = 0.0        # weight of holdings that actually HAVE a beta
+    weighted_return = 0.0
+    return_weight = 0.0
     covered_weight = 0.0
 
     for h in holdings:
@@ -221,22 +244,43 @@ def portfolio_risk(holdings: list[dict], risks: dict[str, TickerRisk]) -> dict:
             continue
         w = float(h.get("weightPct") or 0) / 100
         covered_weight += w
-        weighted_vol_sq += (w * r.volatility_pct) ** 2
+        sum_w_sigma += w * r.volatility_pct
+        sum_w2_sigma2 += (w * r.volatility_pct) ** 2
+        weighted_return += w * r.period_return_pct
+        return_weight += w
+        # Beta is tracked against its OWN weight. Dividing by covered_weight
+        # instead diluted the result by holdings whose beta could not be
+        # measured: a 50/50 book with one beta of 1.2 and one unmeasurable
+        # reported 0.6 — "half as market-sensitive as the index" for a book
+        # that is more sensitive than it.
         if r.beta is not None:
             weighted_beta += w * r.beta
+            beta_weight += w
 
     if covered_weight <= 0:
         return {"available": False, "coveragePct": 0.0}
 
-    # Sum-of-squares assumes zero correlation between holdings, which understates
-    # a concentrated book. Indian equities are heavily co-moving, so apply a
-    # correlation uplift rather than pretending the diversification is free.
-    CORRELATION_UPLIFT = 1.25
-    vol = math.sqrt(weighted_vol_sq) * CORRELATION_UPLIFT / max(covered_weight, 1e-9)
+    # Uniform-pairwise-correlation model:
+    #     σ_p² = Σwᵢ²σᵢ² + ρ·ΣΣ_{i≠j} wᵢwⱼσᵢσⱼ  =  ρ·S² + (1−ρ)·Q
+    # where S = Σwᵢσᵢ and Q = Σwᵢ²σᵢ². This replaces a flat 1.25x uplift on a
+    # zero-correlation sum-of-squares, which was wrong at both ends: for a
+    # single-holding book, portfolio vol IS the asset's vol, yet a real 22% was
+    # reported as 27.5%. Here the cross terms vanish when there is only one
+    # holding, so the identity holds automatically, and ρ=1 collapses to the
+    # weighted average as it should.
+    RHO = 0.35  # typical pairwise correlation across Indian equities
+    var_p = RHO * (sum_w_sigma ** 2) + (1 - RHO) * sum_w2_sigma2
+    vol = math.sqrt(max(var_p, 0.0)) / max(covered_weight, 1e-9)
 
     return {
         "available": True,
         "volatilityPct": round(vol, 1),
-        "beta": round(weighted_beta / covered_weight, 2) if weighted_beta else None,
+        # `if weighted_beta else None` erased a genuine portfolio beta of
+        # exactly 0.0, reporting "unknown" for a real measurement. Presence is
+        # decided by whether any weight carried a beta, not by the value.
+        "beta": round(weighted_beta / beta_weight, 2) if beta_weight > 0 else None,
+        # Trailing-window return over the holdings we could measure, for a
+        # horizon-matched Sharpe. None when nothing was measurable.
+        "periodReturnPct": round(weighted_return / return_weight, 1) if return_weight > 0 else None,
         "coveragePct": round(covered_weight * 100, 1),
     }

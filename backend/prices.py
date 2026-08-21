@@ -42,13 +42,23 @@ class PriceCache:
             pass
 
     def get(self, ticker: str) -> Optional[Dict]:
-        """Get cached price data."""
-        if ticker in self.memory_cache:
-            cached = self.memory_cache[ticker]
-            # Check if cache is fresh (< 1 hour old)
+        """Get cached price data. A malformed entry is treated as a miss.
+
+        This used to assume every value was a dict with a parseable ISO
+        timestamp. A hand-edited or truncated .price_cache.json therefore raised
+        AttributeError (value not a dict) or ValueError (bad timestamp) from a
+        call site outside any try block, turning a stale cache file into an
+        unhandled 500 on /api/prices/{ticker}.
+        """
+        cached = self.memory_cache.get(ticker)
+        if not isinstance(cached, dict):
+            return None
+        try:
             cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
-            if (datetime.now() - cached_at) < timedelta(hours=1):
-                return cached
+        except (TypeError, ValueError):
+            return None
+        if (datetime.now() - cached_at) < timedelta(hours=1):
+            return cached
         return None
 
     def set(self, ticker: str, data: Dict):
@@ -188,21 +198,11 @@ def get_portfolio_metrics(holdings: List[Dict]) -> Dict:
     }
 
 
-# Reference data (for demo/fallback)
-REFERENCE_PRICES = {
-    "TCS": 3580.45,
-    "INFY": 2145.30,
-    "RELIANCE": 2890.50,
-    "HDFCBANK": 1624.75,
-    "ICICIBANK": 1045.20,
-    "WIPRO": 450.85,
-    "BAJAJFINSV": 1580.40,
-    "LT": 3245.30,
-    "ITC": 445.60,
-    "MARUTI": 9845.30,
-}
 
 
-def get_reference_price(ticker: str) -> float:
-    """Get reference price for offline/demo mode."""
-    return REFERENCE_PRICES.get(ticker, 100.0)
+# REFERENCE_PRICES and get_reference_price() were removed together. The function
+# returned a fabricated 100.0 for any unknown ticker, and the table it read was
+# stale by roughly the same margin as engine.KNOWN_STOCKS' old reference column
+# (TCS 3580 against a live ~2349, HDFCBANK 1624 against ~729). Nothing called
+# either one; they were a loaded gun aimed at the next person who needed a
+# "fallback price". If a price cannot be fetched, the holding is unpriced.

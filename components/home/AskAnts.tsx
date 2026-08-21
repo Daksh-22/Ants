@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Send, Sparkles, X } from "lucide-react";
 import { askAnts, type ChatSource } from "@/lib/api/portfolio";
 import { recordActivity } from "@/lib/gamification/dailyActivity";
+import { bumpChatCount } from "@/lib/gamification/lifetimeCounters";
 import { Badge } from "@/components/ui/Badge";
 import type { Analysis } from "@/lib/analysis/types";
 import { cn } from "@/lib/utils/cn";
@@ -34,16 +35,23 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const send = async (question: string) => {
+  const send = async (question: string, echoQuestion = true) => {
     const q = question.trim();
     if (!q || busy) return;
     setInput("");
     setBusy(true);
-    setMessages((m) => [...m, { role: "user", text: q }]);
+    // retry() leaves the user's original bubble in place, so re-appending it
+    // there turned the transcript into the same question asked twice — once per
+    // retry, stacking with each attempt.
+    if (echoQuestion) setMessages((m) => [...m, { role: "user", text: q }]);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 99999, behavior: "smooth" }));
     try {
       const reply = await askAnts(q, analysis);
       recordActivity("chat");
+      // Lifetime count. dailyActivity only tracks TODAY, so ask_ants_master
+      // ("ask 10 questions") had no source at all and could never unlock — its
+      // progress bar was permanently absent and the badge unreachable.
+      bumpChatCount();
       setMessages((m) => [...m, { role: "ants", text: reply.answer, sources: reply.sources }]);
     } catch {
       setMessages((m) => [
@@ -58,7 +66,7 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
 
   const retry = (question: string) => {
     setMessages((m) => m.filter((msg) => !(msg.role === "ants" && msg.failed)));
-    send(question);
+    send(question, false);
   };
 
   return (

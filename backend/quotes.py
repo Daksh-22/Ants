@@ -1,16 +1,19 @@
 """
 Live quote resolution — turns any Indian ticker into (name, sector, price).
 
-Why this exists: engine.KNOWN_STOCKS is a hand-curated table of ~37 tickers
-with hardcoded prices. Anything outside it priced flat at the user's buy price
-(a fake 0% return), and even the curated prices drift badly stale. This module
-resolves quotes live from Yahoo Finance so the analysis is honest about any
-stock, then degrades in clearly-labelled steps when the network won't play.
+Why this exists: engine.KNOWN_STOCKS is a hand-curated table of ~37 tickers.
+Anything outside it priced flat at the user's buy price (a fake 0% return). This
+module resolves quotes live from Yahoo Finance so the analysis is honest about
+any stock, then degrades to an explicitly unpriced state when the network won't
+play — never to a stale price dressed up as a current one.
 
 Resolution order per ticker:
   1. live      — fetched from Yahoo (NSE `.NS`, then BSE `.BO`)
-  2. reference — engine.KNOWN_STOCKS static snapshot (stale but real)
-  3. unpriced  — flat at the user's avg; return shows 0% and we say so
+  2. unpriced  — flat at the user's avg; return shows 0% and we say so
+
+There is no stale-snapshot tier. KNOWN_STOCKS once carried hardcoded prices used
+as a middle step; they drifted ~2 years out of date and were reported to the UI
+as real valuations, so only its names and sectors remain.
 
 Design notes:
   * Two caches with different TTLs: prices go stale in minutes, names and
@@ -212,12 +215,13 @@ def resolve_quotes(tickers: Iterable[str], avg_by_ticker: dict[str, float] | Non
     for k in keys:
         if k in resolved:
             continue
+        avg = float(avg_by_ticker.get(k) or 0)
         curated = KNOWN_STOCKS.get(k)
-        if curated:
-            name, sector, ref_price = curated
-            resolved[k] = Quote(k, name, sector, float(ref_price), "reference")
-        else:
-            avg = float(avg_by_ticker.get(k) or 0)
-            resolved[k] = Quote(k, k, "Other", avg if avg > 0 else 0.0, "unpriced")
+        # A curated entry gives a trustworthy name and sector; it no longer
+        # carries a price. Either way the quote is unpriced, held at the user's
+        # own average, so nothing downstream computes a return against a number
+        # we cannot stand behind.
+        name, sector = curated if curated else (k, "Other")
+        resolved[k] = Quote(k, name, sector, avg if avg > 0 else 0.0, "unpriced")
 
     return resolved

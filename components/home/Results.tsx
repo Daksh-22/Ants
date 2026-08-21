@@ -18,8 +18,6 @@ import { TipCheck } from "@/components/home/TipCheck";
 import { DailyCheckInPrompt } from "@/components/gamification/DailyCheckInPrompt";
 import { DailyMissions } from "@/components/gamification/DailyMissions";
 import { LevelProgress } from "@/components/gamification/LevelProgress";
-import { XP_REWARDS } from "@/lib/gamification/xpSystem";
-import { recordActivity } from "@/lib/gamification/dailyActivity";
 
 // recharts is heavy — load the sparkline lazily so first paint stays light
 const ScoreTrend = dynamic(
@@ -115,11 +113,11 @@ export function Results() {
     markFixDone,
     unmarkFixDone,
     reset,
-    earnXp,
     gamification,
     unlockAchievement,
   } = useAppState();
   const analysis = stored ?? DEFAULT_ANALYSIS;
+  const isDemoView = isDemo || analysis.source === "demo";
 
   const [openFixId, setOpenFixId] = useState<string | null>(null);
 
@@ -138,18 +136,28 @@ export function Results() {
 
   // True only for the very first results render of a session, so the daily
   // check-in sheet doesn't land on top of the answer the user just waited for.
+  // Read during render, WRITE in an effect. The write used to live inside this
+  // useState initializer — a side effect during render, which StrictMode
+  // double-invokes in development: the first call set the flag and the second
+  // read it back, so a brand-new user resolved to `false` and the full-screen
+  // check-in prompt landed straight on top of the analysis they had just waited
+  // for. Production didn't double-invoke, which made the guard untestable
+  // locally — the worse half of the bug.
   const [isFirstResult] = useState(() => {
     try {
-      const seen = localStorage.getItem("ants:seen-results");
-      if (!seen) {
-        localStorage.setItem("ants:seen-results", "1");
-        return true;
-      }
+      return !localStorage.getItem("ants:seen-results");
     } catch {
-      // localStorage unavailable — treat as a returning user
+      return false; // storage unavailable — treat as a returning user
     }
-    return false;
   });
+  useEffect(() => {
+    if (!isFirstResult) return;
+    try {
+      localStorage.setItem("ants:seen-results", "1");
+    } catch {
+      // ignore persistence failures
+    }
+  }, [isFirstResult]);
 
   const fixesById = useMemo(() => {
     const map = new Map<string, FixPlan>();
@@ -219,7 +227,14 @@ export function Results() {
           they didn't have yet. */}
       {!isFirstResult && <DailyCheckInPrompt />}
 
-      {isDemo && <DemoBanner className="mx-5 mt-4" />}
+      {/* The other three pages compute `isDemo || analysis.source === "demo"`,
+          with a comment warning that separate checks "could disagree". This one
+          checked isDemo alone, so when `analyzed` was true but the stored
+          analysis failed the hydration shape guard, Results fell back to
+          DEFAULT_ANALYSIS and presented Arjun Mehta's book as the user's own
+          money with NO banner — while /portfolio showed the same numbers WITH
+          one. Same test everywhere now. */}
+      {isDemoView && <DemoBanner className="mx-5 mt-4" />}
 
       {/* portfolio strip — floats on the base, no container */}
       <Reveal className="px-5 pb-6 pt-7">
@@ -474,9 +489,9 @@ export function Results() {
             onClose={() => setOpenFixId(null)}
             onUnmarkDone={unmarkFixDone}
             onMarkDone={(id) => {
+              // markFixDone now owns the XP and the daily "fix" signal, so undo
+              // reverses exactly what marking paid.
               markFixDone(id);
-              earnXp(XP_REWARDS.FIX_COMPLETED, "Fix completed");
-              recordActivity("fix");
               setOpenFixId(null);
             }}
           />

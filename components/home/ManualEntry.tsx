@@ -146,8 +146,21 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
 
   const complete = rows.filter(isRowComplete);
   const incomplete = rows.filter((r) => isRowTouched(r) && !isRowComplete(r));
-  // A started-but-unfinished row must block submission, not be discarded.
-  const canSubmit = complete.length > 0 && incomplete.length === 0;
+  // A ticker the lookup could not identify must block submission too. It used to
+  // be shown as an inline amber note and otherwise ignored, so typing "TSC" for
+  // TCS sailed through: the backend then priced the phantom at the user's own
+  // average, giving a holding sitting at exactly 0.0% that still counted toward
+  // totalValue, every weightPct and the concentration flags — the precise
+  // corruption this lookup exists to prevent.
+  const unresolved = rows.filter((r) => statusFor(r.ticker)?.state === "missing");
+  // Don't let an in-flight lookup submit either — otherwise the fast typist
+  // beats the 500ms debounce and skips the check entirely.
+  const pendingLookup = rows.filter((r) => statusFor(r.ticker)?.state === "checking");
+  const canSubmit =
+    complete.length > 0 &&
+    incomplete.length === 0 &&
+    unresolved.length === 0 &&
+    pendingLookup.length === 0;
 
   const total = complete.reduce((sum, r) => sum + Number(r.qty) * Number(r.avg), 0);
   const liveTotal = useCountUp(total, 500);
@@ -162,7 +175,7 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
   };
 
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-base">
+    <div className="fixed inset-0 z-[55] overflow-y-auto bg-base">
       <motion.div
         initial={{ opacity: 0, x: 16 }}
         animate={{ opacity: 1, x: 0 }}
@@ -308,10 +321,19 @@ export function ManualEntry({ onBack, onSubmit, initialPositions, reviewBanner }
               <span className="font-bold tabular text-primary">{formatINR(liveTotal)}</span>
             </p>
           )}
+          {unresolved.length > 0 && (
+            <p className="mb-2 text-center text-[12px] text-amber">
+              {unresolved.length === 1
+                ? `We can't identify "${unresolved[0].ticker.trim().toUpperCase()}". Fix the spelling or remove that row.`
+                : `${unresolved.length} symbols can't be identified. Fix the spelling or remove those rows.`}
+            </p>
+          )}
           <Button className="w-full disabled:opacity-40" disabled={!canSubmit} onClick={handleSubmit}>
             {canSubmit
               ? `Analyze ${complete.length} position${complete.length > 1 ? "s" : ""}`
-              : "Analyze my portfolio"}
+              : pendingLookup.length > 0
+                ? "Checking symbols…"
+                : "Analyze my portfolio"}
           </Button>
           <p className="mt-3 text-center text-[11px] text-muted">
             🔒 Stays on your device. We don&apos;t store anything.

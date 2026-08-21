@@ -88,7 +88,13 @@ export function ScoreTrend({ score }: { score: number }) {
 
   if (history.length < 2) return null;
 
+  // history is capped at MAX_ENTRIES via .slice(-MAX_ENTRIES), so history[0] is
+  // only the first scan until the cap is reached. Past it, a user who went
+  // 40 → 90 → 75 across 70 recorded points was shown a NEGATIVE delta labelled
+  // "since your first scan". The window is honest about what it actually spans.
+  const atCap = history.length >= MAX_ENTRIES;
   const delta = history[history.length - 1].score - history[0].score;
+  const deltaLabel = atCap ? `over your last ${history.length} scans` : "since your first scan";
   const milestone = nextMilestone(score);
 
   return (
@@ -104,7 +110,7 @@ export function ScoreTrend({ score }: { score: number }) {
               delta > 0 ? "text-teal" : "text-red"
             )}
           >
-            {delta > 0 ? `+${delta}` : delta} since your first scan
+            {delta > 0 ? `+${delta}` : delta} {deltaLabel}
           </span>
         )}
       </div>

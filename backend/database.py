@@ -17,12 +17,37 @@ from pydantic import BaseModel, Field
 import os
 import json
 
-# Initialize Supabase client
+# ─── Supabase client ────────────────────────────────────────────────────────
+# Both credentials must be present AND real. The old check tested only the URL,
+# so a key-less config still produced a live client — and once main.py started
+# actually loading backend/.env, the placeholder values shipped in .env.example
+# ("https://your-project.supabase.co" / "your-anon-key") were enough to make
+# /healthz advertise accountsEnabled: true. Every account route then raised on
+# first use and returned a 500, which is strictly worse than the honest 503
+# _require_account_store() gives when the store is absent.
+
+_PLACEHOLDERS = {
+    "",
+    "your-anon-key",
+    "your-key",
+    "your-service-role-key",
+    "https://your-project.supabase.co",
+    "your-project",
+}
+
+
+def _real(value: str) -> bool:
+    """A credential that is present and not one of the documented stand-ins."""
+    v = value.strip()
+    return bool(v) and v.lower() not in _PLACEHOLDERS
+
+
 try:
     from supabase import create_client, Client
     SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-    supabase: Optional[Client] = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
+    _configured = _real(SUPABASE_URL) and _real(SUPABASE_KEY)
+    supabase: Optional[Client] = create_client(SUPABASE_URL, SUPABASE_KEY) if _configured else None
 except ImportError:
     supabase = None
 
@@ -135,6 +160,22 @@ class Database:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         return result.data[0] if result.data else None
+
+    async def delete_portfolio(self, portfolio_id: str) -> bool:
+        """Delete a portfolio and its holdings. Returns False when there's no store.
+
+        Exists so the CSV import can undo itself: Supabase gives us no
+        transaction across the portfolio insert and the per-row holding inserts,
+        so a failure partway through would otherwise leave a half-populated
+        portfolio behind alongside an error response. Holdings are removed first
+        because a foreign key would otherwise block the parent delete.
+        """
+        if not self.client:
+            return False
+
+        self.client.table("holdings").delete().eq("portfolio_id", portfolio_id).execute()
+        self.client.table("portfolios").delete().eq("id", portfolio_id).execute()
+        return True
 
     async def get_portfolios(self, user_id: str) -> List[dict]:
         """Get all portfolios for a user."""

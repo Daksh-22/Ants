@@ -6,6 +6,7 @@ import { Check } from "lucide-react";
 import { useAppState } from "@/components/app/AppState";
 import {
   missionsForToday,
+  missionDayKey,
   loadClaims,
   saveClaims,
   type MissionDef,
@@ -23,27 +24,61 @@ import { cn } from "@/lib/utils/cn";
 export function DailyMissions() {
   const { earnXp, gamification } = useAppState();
   // missionsForToday is pure/synchronous — no first-paint layout shift
-  const [missions] = useState<MissionDef[]>(() => missionsForToday());
+  const [missions, setMissions] = useState<MissionDef[]>(() => missionsForToday());
   const [claimed, setClaimed] = useState<string[]>(() => loadClaims().claimed);
   const [aceClaimed, setAceClaimed] = useState(() => loadClaims().aceClaimed);
   const [aceCelebrating, setAceCelebrating] = useState(false);
+  // The day the currently-rendered set belongs to. `missions` was frozen at
+  // mount while saveClaims stamped the day at CLAIM time, so an app left open
+  // across local midnight showed yesterday's three missions and wrote the claim
+  // under today's date. A reload then loaded today's set, found none of its ids
+  // in the log, and offered all three again — four payouts plus a second Daily
+  // Ace for one calendar day. When the two seeds happened to overlap it failed
+  // the other way, rendering today's missions as already claimed for no XP.
+  const [dayKey, setDayKey] = useState<string>(() => missionDayKey());
   // bump to re-evaluate isDone() after activity elsewhere on the page/app
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    const bump = () => setTick((t) => t + 1);
+    const bump = () => {
+      const today = missionDayKey();
+      if (today !== dayKey) {
+        // rolled over — adopt today's set and today's (empty) claim log
+        const fresh = loadClaims();
+        setDayKey(today);
+        setMissions(missionsForToday());
+        setClaimed(fresh.claimed);
+        setAceClaimed(fresh.aceClaimed);
+        setAceCelebrating(false);
+      }
+      setTick((t) => t + 1);
+    };
     window.addEventListener("focus", bump);
     document.addEventListener("visibilitychange", bump);
+    // Catch a rollover even if the tab is never blurred — someone watching the
+    // screen at midnight should not be able to claim yesterday's list.
+    const timer = setInterval(bump, 60_000);
     return () => {
       window.removeEventListener("focus", bump);
       document.removeEventListener("visibilitychange", bump);
+      clearInterval(timer);
     };
-  }, []);
+  }, [dayKey]);
 
   if (missions.length === 0) return null;
 
   const claim = (m: MissionDef) => {
     if (claimed.includes(m.id)) return;
+    // Refuse to pay against a stale set: roll over first and let the user claim
+    // from today's list, so the id we bank always belongs to the date we stamp.
+    if (missionDayKey() !== dayKey) {
+      const fresh = loadClaims();
+      setDayKey(missionDayKey());
+      setMissions(missionsForToday());
+      setClaimed(fresh.claimed);
+      setAceClaimed(fresh.aceClaimed);
+      return;
+    }
     const nextClaimed = [...claimed, m.id];
     setClaimed(nextClaimed);
     earnXp(m.xp, m.title);
@@ -57,7 +92,7 @@ export function DailyMissions() {
       earnXp(XP_REWARDS.DAILY_ACE_BONUS, "Daily Ace — all 3 done");
       setTimeout(() => setAceCelebrating(false), 1500);
     }
-    saveClaims({ date: new Date().toDateString(), claimed: nextClaimed, aceClaimed: nextAce });
+    saveClaims({ date: dayKey, claimed: nextClaimed, aceClaimed: nextAce });
   };
 
   const allDone = missions.every((m) => claimed.includes(m.id));

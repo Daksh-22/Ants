@@ -53,6 +53,18 @@ function readJSON<T>(key: string): T | null {
   }
 }
 
+/**
+ * Array.isArray alone accepted any array, so an entry written by an older schema
+ * (or hand-edited) could be missing fit_score — which reached useCountUp,
+ * arithmetic'd to NaN, rendered "NaN" in the fit chip and fell through the tone
+ * thresholds to red. Validate each row, drop the ones we can't render.
+ */
+function isUsableItem(x: unknown): x is WatchlistItem {
+  if (!x || typeof x !== "object") return false;
+  const i = x as Partial<WatchlistItem>;
+  return typeof i.ticker === "string" && i.ticker.length > 0 && Number.isFinite(i.fit_score);
+}
+
 function FitChip({
   score,
   ticker,
@@ -98,17 +110,33 @@ export function SmartWatchlist({ analysis }: SmartWatchlistProps) {
 
   useEffect(() => {
     const stored = readJSON<WatchlistItem[]>(WATCHLIST_KEY);
-    if (Array.isArray(stored)) setItems(stored);
+    if (Array.isArray(stored)) setItems(stored.filter(isUsableItem));
   }, []);
 
-  const persist = (next: WatchlistItem[]) => {
-    setItems(next);
-    try {
-      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
-    } catch {
-      // ignore persistence failures
-    }
+  /**
+   * Write through an updater rather than a snapshot.
+   *
+   * Every caller used to pass a value derived from `items` captured at render
+   * time. addTicker awaits a ~2s network call before writing, so a removal that
+   * landed mid-flight was undone: persist([item, ...items]) restored the stale
+   * list, putting the removed row back on screen and back in localStorage. An
+   * updater always composes against the current state.
+   */
+  const persistWith = (updater: (prev: WatchlistItem[]) => WatchlistItem[]) => {
+    setItems((prev) => {
+      const next = updater(prev);
+      try {
+        localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
+      } catch {
+        // ignore persistence failures
+      }
+      return next;
+    });
   };
+
+  /** one row per ticker, first occurrence wins */
+  const dedupe = (list: WatchlistItem[]) =>
+    list.filter((x, i, arr) => arr.findIndex((y) => y.ticker === x.ticker) === i);
 
   const addTicker = async () => {
     const t = ticker.trim().toUpperCase();
@@ -133,7 +161,11 @@ export function SmartWatchlist({ analysis }: SmartWatchlistProps) {
         verdict: result.verdict,
         added_at: new Date().toISOString(),
       };
-      persist([item, ...items]);
+      persistWith((prev) =>
+        // If this ticker was removed while the check was in flight, don't
+        // resurrect it — the user's later action wins over the earlier request.
+        prev.some((i) => i.ticker === item.ticker) ? prev : [item, ...prev]
+      );
       setTicker("");
       setExpanded(item.ticker);
       setJustAdded(item.ticker);
@@ -160,7 +192,7 @@ export function SmartWatchlist({ analysis }: SmartWatchlistProps) {
   };
 
   const remove = (item: WatchlistItem) => {
-    persist(items.filter((i) => i.ticker !== item.ticker));
+    persistWith((prev) => prev.filter((i) => i.ticker !== item.ticker));
     // undo snackbar — a removed research target is one tap from coming back
     if (pendingUndo) clearTimeout(pendingUndo.timer);
     const timer = setTimeout(() => setPendingUndo(null), UNDO_WINDOW_MS);
@@ -170,7 +202,11 @@ export function SmartWatchlist({ analysis }: SmartWatchlistProps) {
   const undoRemove = () => {
     if (!pendingUndo) return;
     clearTimeout(pendingUndo.timer);
-    persist([pendingUndo.item, ...items]);
+    // Prepending blindly produced a SECOND row whenever the item was already
+    // back (an in-flight check having re-added it). Both rows shared
+    // key={item.ticker} in the AnimatePresence map, and remove() filters by
+    // ticker, so deleting one deleted both.
+    persistWith((prev) => dedupe([pendingUndo.item, ...prev]));
     setPendingUndo(null);
   };
 

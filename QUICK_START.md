@@ -1,77 +1,57 @@
-# Quick Start: Make Ants Fully Functional
+# Quick Start
 
-## What I've Done ✅
-- ✅ Set up backend with Claude API key
-- ✅ Verified backend returns real analysis (not demo)
-- ✅ Connected frontend to backend
-- ✅ Tested the API with real portfolio data
-- ✅ Created deployment guides
+The short version. Full detail, troubleshooting and the `/healthz` field
+reference live in [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md).
 
-## What You Need to Do 🚀
+## Get three secrets ready
 
-### Copy-Paste These 5 Steps:
+```bash
+# 1. A working Anthropic key — the one in backend/.env returns 401.
+#    Replace it at https://console.anthropic.com, then check the new one:
+curl -s https://api.anthropic.com/v1/messages -H "x-api-key: PASTE_KEY_HERE" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" -d '{"model":"claude-opus-5","max_tokens":4,"messages":[{"role":"user","content":"hi"}]}'
 
-#### Step 1: Go to Render Dashboard
-https://dashboard.render.com
-
-#### Step 2: Create Backend Service
-- Click **New** → **Web Service**
-- Name: `ants-backend`
-- Root Directory: `backend`
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Plan: Free
-
-#### Step 3: Add API Key to Render
-After creating service:
-- Click **Settings** → **Environment**
-- Add these 5 variables:
-
-```
-ANTHROPIC_API_KEY = sk-ant-api03-YOUR_API_KEY_HERE
-ANTHROPIC_MODEL = claude-opus-4-8
-ENVIRONMENT = production
-JWT_SECRET = prod-secret
-ALLOWED_ORIGINS = https://ants-delta.vercel.app
+# 2. A real JWT signing secret — NOT "prod-secret".
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-- Click **Deploy**
-- Copy your backend URL when done (looks like: `https://ants-backend-xxx.onrender.com`)
+3. `SUPABASE_URL` + `SUPABASE_KEY` from your Supabase project — optional, but
+   signup/login and saved portfolios stay off without them.
 
-#### Step 4: Update Vercel
-- Go to https://vercel.com
-- Select "Ants" project
-- Settings → Environment Variables
-- Add:
-  ```
-  NEXT_PUBLIC_API_URL = https://ants-backend-xxx.onrender.com
-  ```
-- Go to Deployments → Redeploy
+## Deploy
 
-#### Step 5: Test It!
-- Visit your app at https://ants-delta.vercel.app
-- Click "Scan a different portfolio"
-- Upload a screenshot
-- Should show real analysis (not demo)
+```bash
+git push origin main
+```
 
----
+**Backend** — https://dashboard.render.com → **New** → **Blueprint** → pick
+`Daksh-22/Ants`. It reads `render.yaml` and asks for the four secret values.
+Use Blueprint, **not** a manual Web Service: only `backend/Dockerfile` installs
+the `tesseract` binary the free OCR fallback needs.
 
-## That's It!
+Copy the resulting URL, then confirm:
 
-Your app is now fully functional and market-ready. Each user will get:
-- ✨ Real portfolio analysis based on their holdings
-- ✨ AI-powered screenshot OCR (extract holdings from any broker app)
-- ✨ Personalized feedback (not generic demo data)
-- ✨ Ask Ants chat for investment questions
-- ✨ Gamification (XP, achievements, streaks)
+```bash
+curl -s https://ants-backend-xxxx.onrender.com/healthz
+```
 
----
+Want `"aiEnabled": true` and `"aiLastError": null`. If `aiLastError` is set, the
+key reached the service but was rejected — the message says why.
 
-## Questions?
+**Frontend** — https://vercel.com → Ants → **Settings** → **Environment
+Variables** → add `NEXT_PUBLIC_API_URL` = your Render URL (no trailing slash),
+all three environments. Then **Deployments** → latest → ⋯ → **Redeploy**.
 
-Check the full guide: `DEPLOYMENT_GUIDE.md`
+The redeploy is not optional. `NEXT_PUBLIC_*` is baked into the bundle at build
+time, so saving the variable alone changes nothing.
 
-If something doesn't work:
-- Backend not responding? Check Render logs
-- Still showing demo analysis? Check ALLOWED_ORIGINS in Render
-- Upload failing? Check browser console for errors
+## Verify
+
+Open https://ants-delta.vercel.app, upload a broker screenshot, confirm the
+extracted holdings shown for review are right, then run the analysis. Run a
+second, different portfolio and check the output actually differs.
+
+## What is not built
+
+Price alerts do not fire on live price moves — they are checked in the browser
+against the prices from your last analysis. Broker linking and order execution
+return 503 by design. See the Known limitations section of the full guide.

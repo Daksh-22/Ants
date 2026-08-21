@@ -18,6 +18,8 @@ because each previously returned invented values the UI presented as real:
 
 Env: ANTHROPIC_API_KEY (optional — enables AI), ANTHROPIC_MODEL,
      ALLOWED_ORIGINS (comma-separated, for the deployed frontend), PORT.
+     Read from the process env first, then backend/.env.local, then
+     backend/.env — so a hosting dashboard always overrides a local file.
 """
 
 from __future__ import annotations
@@ -30,20 +32,42 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-import ai
-import benchmarks
-import engine
-import metrics
-import rag
-import auth
-import database
-import prices
-import risk as risk_stats
-import ocr_tesseract
-from csv_importer import csv_to_holdings
+# ── Environment, before anything reads it ───────────────────────────────────
+# python-dotenv was a dependency that nothing ever called, so backend/.env and
+# backend/.env.local — both holding a real ANTHROPIC_API_KEY, JWT_SECRET and
+# Supabase credentials — were never loaded. Running `uvicorn main:app` picked up
+# none of it: AI silently degraded to fallback, accounts stayed disabled, and
+# JWT signing fell back to its development default.
+#
+# This has to run BEFORE the local imports below. ai.py, auth.py and
+# database.py all read os.environ at module scope, so importing them first
+# freezes in the unset values no matter what we load afterwards. The import
+# placement is deliberate, not an oversight — hence the noqa.
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+# override=False means real process env wins over both files, and .env.local
+# wins over .env — the platform dashboard stays the source of truth in
+# production, while a local file can shadow the committed defaults.
+load_dotenv(_BACKEND_DIR / ".env.local", override=False)
+load_dotenv(_BACKEND_DIR / ".env", override=False)
+
+import ai  # noqa: E402
+import benchmarks  # noqa: E402
+import engine  # noqa: E402
+import rag  # noqa: E402
+import auth  # noqa: E402
+import database  # noqa: E402
+import prices  # noqa: E402
+import risk as risk_stats  # noqa: E402
+import ocr_tesseract  # noqa: E402
+from csv_importer import csv_to_holdings  # noqa: E402
 
 app = FastAPI(
     title="Ants Backend",
@@ -52,9 +76,19 @@ app = FastAPI(
 )
 
 _default_origins = "http://localhost:3000,http://127.0.0.1:3000"
+IS_PRODUCTION = os.environ.get("ENVIRONMENT", "development").strip().lower() == "production"
+
+# The any-localhost-port regex is a development convenience: it lets `next dev`
+# work on whatever port it grabs. It was OR'd with allow_origins unconditionally,
+# so the deployed API also accepted CREDENTIALED cross-origin requests from
+# http://localhost:<anything> — any other app or notebook running on a user's
+# machine could read their authenticated responses. In production the explicit
+# ALLOWED_ORIGINS list is the only thing honoured.
+_dev_origin_regex = None if IS_PRODUCTION else r"http://(localhost|127\.0\.0\.1):\d+"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origin_regex=_dev_origin_regex,
     allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
@@ -70,8 +104,14 @@ class Position(BaseModel):
     avg: float = Field(..., gt=0)
 
 
+# Every position triggers a blocking yfinance lookup. ResolveRequest was already
+# capped at 50; these were not, so one unauthenticated POST with 300 tickers
+# serialized ~300 network fetches and starved every other request on the worker.
+MAX_POSITIONS = 60
+
+
 class AnalyzeRequest(BaseModel):
-    positions: List[Position]
+    positions: List[Position] = Field(..., max_length=MAX_POSITIONS)
     source: str = "manual"
 
 
@@ -90,6 +130,45 @@ class OrderRequest(BaseModel):
     qty: int
     price: float
     order_type: str = "LIMIT"
+
+
+MAX_IMAGE_BYTES = 8_000_000
+MAX_CSV_BYTES = 2_000_000
+
+
+async def _read_capped(file: UploadFile, limit: int, over_limit_detail: str) -> bytes:
+    """Read an upload in chunks, aborting the moment it exceeds `limit`.
+
+    `await file.read()` buffers the ENTIRE body and only then compares its
+    length, so the 8MB check ran after the bytes were already in memory: a 2GB
+    POST exhausted the worker before the 413 could be written. Reading in chunks
+    means an oversized body costs one chunk past the limit, not all of it.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=over_limit_detail)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _written(row: Any, what: str) -> Any:
+    """Return a write's result, or fail loudly if the store gave us nothing.
+
+    Supabase inserts return an empty `data` list when the write is rejected —
+    an RLS policy denial, most commonly — and the db layer maps that to None.
+    Every one of these endpoints returned that None straight through with a 200,
+    so the client received the JSON literal `null` for what looked like a
+    successful create and only broke later, somewhere unrelated.
+    """
+    if row is None:
+        raise HTTPException(status_code=502, detail=f"Couldn't save the {what}. Try again.")
+    return row
 
 
 # ─── Health ──────────────────────────────────────────────────────────────────
@@ -117,7 +196,7 @@ async def healthz():
 # ─── 1. Portfolio analysis ───────────────────────────────────────────────────
 
 @app.post("/api/analyze", tags=["Analysis"])
-async def analyze_portfolio(payload: AnalyzeRequest):
+def analyze_portfolio(payload: AnalyzeRequest):
     """Positions → full Analysis (engine math, AI-polished copy when available)."""
     try:
         analysis = engine.analyze([p.model_dump() for p in payload.positions], source=payload.source)
@@ -127,13 +206,57 @@ async def analyze_portfolio(payload: AnalyzeRequest):
 
 
 @app.get("/api/analyze/demo", tags=["Analysis"])
-async def analyze_demo(source: str = "demo"):
-    """The Arjun Mehta demo portfolio through the same real engine."""
-    return engine.demo_analysis(source=source)
+def analyze_demo(source: str = "demo"):
+    """The Arjun Mehta demo portfolio through the same real engine.
+
+    `source` is what the UI reads to decide whether to show the "sample
+    portfolio" banner. Echoing an arbitrary caller-supplied string let
+    ?source=broker relabel the demo book as an Account Aggregator sync — exactly
+    the "fake data presented as real" this module's docstring says was removed.
+    """
+    if source != "demo":
+        raise HTTPException(
+            status_code=400,
+            detail="The demo portfolio is only ever source=demo.",
+        )
+    return engine.demo_analysis(source="demo")
+
+
+def _risk_shares(holdings: list[dict], per_ticker: dict) -> list[dict]:
+    """Per-holding share of portfolio risk, normalised to sum to 100.
+
+    Uses wᵢσᵢ / Σwⱼσⱼ — the contribution each holding makes to weighted
+    volatility. It is a simplification (a full decomposition needs the
+    covariance matrix, and risk.py models correlation as a single uniform rho),
+    but it has the property the UI actually claims: the numbers are shares of
+    one whole, so they add to 100% and a single holding owns 100% of its own
+    risk. Returns [] when nothing measurable is left to divide by.
+    """
+    rows = []
+    for h in holdings:
+        k = engine._norm(str(h["ticker"]))
+        r = per_ticker.get(k)
+        if not r:
+            continue
+        rows.append((h, r, float(h.get("weightPct") or 0) / 100 * r.volatility_pct))
+
+    total = sum(w for _, _, w in rows)
+    if total <= 0:
+        return []
+
+    return [
+        {
+            "ticker": h["ticker"],
+            "sector": h["sector"],
+            "volatility_pct": r.volatility_pct,
+            "contribution_to_portfolio_risk": round(w / total * 100, 1),
+        }
+        for h, r, w in rows
+    ]
 
 
 @app.post("/api/metrics", tags=["Analysis"])
-async def portfolio_metrics(payload: AnalyzeRequest):
+def portfolio_metrics(payload: AnalyzeRequest):
     """Positions → risk metrics: volatility, Sharpe, est. max drawdown, beta,
     composite risk score, plus per-holding risk contributions."""
     try:
@@ -160,8 +283,17 @@ async def portfolio_metrics(payload: AnalyzeRequest):
         }
 
     vol = book["volatilityPct"]
-    ret = analysis["summary"]["returnsPct"]
     RISK_FREE_PCT = 6.0  # ~1y Indian government bond
+
+    # Sharpe needs both terms on the same horizon. This used to divide
+    # summary.returnsPct — return SINCE PURCHASE, possibly several years — by an
+    # ANNUALISED volatility, so a user up 120% since 2020 on a 25%-vol book was
+    # shown 4.56, which reads as world-class when the honest figure is under 1.
+    # risk.py now reports the trailing 1-year return of the same price series the
+    # volatility comes from, so the ratio is dimensionally coherent. When that
+    # window isn't measurable we omit the ratio rather than mixing horizons.
+    annual_ret = book.get("periodReturnPct")
+    sharpe = round((annual_ret - RISK_FREE_PCT) / vol, 2) if (annual_ret is not None and vol > 0) else None
 
     # Weight-aware worst historical drawdown across the book.
     dd_num = sum(
@@ -178,23 +310,18 @@ async def portfolio_metrics(payload: AnalyzeRequest):
     return {
         "risk": {
             "volatility_pct": vol,
-            "sharpe_ratio": round((ret - RISK_FREE_PCT) / vol, 2) if vol > 0 else 0.0,
+            "sharpe_ratio": sharpe,
             "max_drawdown_pct": round(dd_num / covered, 1),
             "beta_vs_nifty": book.get("beta"),
             "risk_score": risk_score,
         },
-        "holdingVolatilities": [
-            {
-                "ticker": h["ticker"],
-                "sector": h["sector"],
-                "volatility_pct": per_ticker[k].volatility_pct,
-                "contribution_to_portfolio_risk": round(
-                    per_ticker[k].volatility_pct * float(h.get("weightPct") or 0) / 100, 1
-                ),
-            }
-            for h in holdings
-            if (k := engine._norm(str(h["ticker"]))) in per_ticker
-        ],
+        # Shares of risk, normalised to sum to 100 across the measured holdings.
+        # This was wᵢ·σᵢ in raw volatility POINTS, rendered with a "%" suffix
+        # under a "biggest risk contributors" heading: three equal-weight
+        # holdings at 30% vol each read "10%, 10%, 10%" — as though they made up
+        # 30% of the risk when they are the entire book. A lone holding reported
+        # "30%" of its own risk.
+        "holdingVolatilities": _risk_shares(holdings, per_ticker),
         # What share of the book these numbers actually cover — the UI should
         # hedge rather than imply full coverage on a partially-resolved book.
         "coveragePct": book["coveragePct"],
@@ -206,7 +333,7 @@ class ResolveRequest(BaseModel):
 
 
 @app.post("/api/resolve", tags=["Analysis"])
-async def resolve_tickers(payload: ResolveRequest):
+def resolve_tickers(payload: ResolveRequest):
     """Validate tickers before analysis: which resolve, to what, at what price.
 
     Without this, a typo silently became a holding — an unresolvable symbol
@@ -226,26 +353,68 @@ async def resolve_tickers(payload: ResolveRequest):
     for raw in cleaned:
         key = engine._norm(raw)
         q = resolved.get(key)
-        priced = bool(q and q.source in ("live", "reference") and q.price > 0)
+        # "found" answers "is this a real symbol?", which is a different question
+        # from "can we price it right now?". Conflating them meant that with the
+        # stale-snapshot tier removed, a Yahoo outage made every valid ticker
+        # report as a typo — the form would tell someone RELIANCE doesn't exist
+        # and suggest checking the spelling. Recognition comes from a live hit or
+        # the curated table; the price is reported separately and may be null.
+        live = bool(q and q.source == "live" and q.price > 0)
+        found = live or key in engine.KNOWN_STOCKS
         out.append({
             "input": raw,
             "ticker": key,
-            "found": priced,
-            "name": q.name if priced else None,
-            "sector": q.sector if priced else None,
-            "cmp": round(q.price, 2) if priced else None,
+            "found": found,
+            "name": q.name if (found and q) else None,
+            "sector": q.sector if (found and q) else None,
+            "cmp": round(q.price, 2) if live else None,
             "priceSource": q.source if q else "unpriced",
         })
     return {"results": out}
 
 
+class QuotesRequest(BaseModel):
+    tickers: List[str] = Field(..., max_length=50)
+
+
+@app.post("/api/quotes", tags=["Prices"])
+def live_quotes(payload: QuotesRequest):
+    """Current price per ticker, for re-evaluating something against the market.
+
+    Price alerts previously compared their targets against whatever quote was
+    frozen into the stored analysis, so an alert could only ever resolve using
+    prices that might be hours or days old — a target could be crossed and the
+    alert would sit there inactive until the user happened to re-run an analysis.
+    This lets the client re-price on open.
+
+    Deliberately built on quotes.resolve_quotes rather than prices.py: the latter
+    reports a failed lookup as a real 0% and would let an alert "fire" against a
+    price we never actually got. Anything unresolved comes back source
+    "unpriced" with price 0 and the caller must skip it.
+    """
+    cleaned = [t for t in (str(x).strip() for x in payload.tickers) if t][:50]
+    if not cleaned:
+        return {"quotes": {}}
+
+    import quotes as quotes_mod
+
+    resolved = quotes_mod.resolve_quotes([engine._norm(t) for t in cleaned], {})
+    return {
+        "quotes": {
+            key: {"price": round(q.price, 2), "source": q.source}
+            for key, q in resolved.items()
+        },
+        "asOf": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class CheckRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=40)
-    positions: List[Position]
+    positions: List[Position] = Field(..., max_length=MAX_POSITIONS)
 
 
 @app.post("/api/check", tags=["Analysis"])
-async def check_tip(payload: CheckRequest):
+def check_tip(payload: CheckRequest):
     """Tip Check — what buying this ticker actually does to YOUR portfolio.
     Facts + tone from the engine; verdict wording sharpened by AI when enabled."""
     try:
@@ -270,19 +439,27 @@ async def ocr_screenshot(file: UploadFile = File(...)):
     """
     if file.content_type not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
         raise HTTPException(status_code=415, detail="Upload a PNG/JPEG/WebP screenshot.")
-    raw = await file.read()
-    if len(raw) > 8_000_000:
-        raise HTTPException(status_code=413, detail="Image over 8MB — crop to the holdings list.")
+    raw = await _read_capped(
+        file, MAX_IMAGE_BYTES, "Image over 8MB — crop to the holdings list."
+    )
 
     media_type = _sniff_image(raw)
     if media_type is None:
         raise HTTPException(status_code=415, detail="That file isn't a readable image. Upload a PNG/JPEG/WebP screenshot.")
 
-    holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), media_type)
+    # These three are blocking: a multi-second vision call, then a batch of
+    # yfinance fetches, then another model call. This handler has to stay async
+    # for `await file.read()`, so the blocking work is pushed to the threadpool
+    # explicitly — otherwise one screenshot upload parks the event loop for
+    # seconds and every other request, /healthz included, waits behind it.
+    holdings = await run_in_threadpool(
+        ai.extract_holdings, base64.standard_b64encode(raw).decode(), media_type
+    )
     if holdings:
         try:
-            analysis = engine.analyze(holdings, source="screenshot")
-            return {**ai.polish_analysis(analysis), "aiUsed": True}
+            analysis = await run_in_threadpool(engine.analyze, holdings, source="screenshot")
+            polished = await run_in_threadpool(ai.polish_analysis, analysis)
+            return {**polished, "aiUsed": True}
         except ValueError:
             pass
 
@@ -314,9 +491,9 @@ async def ocr_extract(file: UploadFile = File(...)):
     them blindly). Never silently substitutes demo data."""
     if file.content_type not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
         raise HTTPException(status_code=415, detail="Upload a PNG/JPEG/WebP screenshot.")
-    raw = await file.read()
-    if len(raw) > 8_000_000:
-        raise HTTPException(status_code=413, detail="Image over 8MB — crop to the holdings list.")
+    raw = await _read_capped(
+        file, MAX_IMAGE_BYTES, "Image over 8MB — crop to the holdings list."
+    )
 
     # content_type is client-supplied and trivially spoofed. Sniff the real
     # bytes so a mislabelled file fails here with a clear message instead of
@@ -327,12 +504,16 @@ async def ocr_extract(file: UploadFile = File(...)):
 
     ai_failed = False
     if ai.have_ai():
-        holdings = ai.extract_holdings(base64.standard_b64encode(raw).decode(), media_type)
+        holdings = await run_in_threadpool(
+            ai.extract_holdings, base64.standard_b64encode(raw).decode(), media_type
+        )
         if holdings:
             return {"holdings": holdings, "method": "ai_vision"}
         ai_failed = True
 
-    holdings = ocr_tesseract.extract_holdings_tesseract(raw)
+    # Tesseract shells out to a native binary and is CPU-bound; on the event
+    # loop it blocks just as hard as a network call.
+    holdings = await run_in_threadpool(ocr_tesseract.extract_holdings_tesseract, raw)
     if holdings:
         note = "Read with free OCR — double-check these numbers before analyzing."
         if ai_failed and ai.last_error():
@@ -349,13 +530,15 @@ async def ocr_extract(file: UploadFile = File(...)):
 # ─── 3. Ask Ants (RAG chat) ─────────────────────────────────────────────────
 
 @app.post("/api/chat", tags=["AI"])
-async def ask_ants(payload: ChatRequest):
+def ask_ants(payload: ChatRequest):
     return ai.chat(payload.question, payload.analysis)
 
 
 @app.get("/api/rag/search", tags=["AI"])
-async def rag_search(q: str, k: int = 4):
-    return {"query": q, "results": rag.retrieve(q, k=min(k, 10))}
+def rag_search(q: str, k: int = 4):
+    # min(k, 10) let k=-1 through, and rag.retrieve slices ranked[:-1] — which
+    # returns everything but the last chunk instead of a top-k. Clamp both ends.
+    return {"query": q, "results": rag.retrieve(q, k=max(1, min(k, 10)))}
 
 
 # ─── 4. Account Aggregator ──────────────────────────────────────────────────
@@ -462,7 +645,7 @@ async def swarm_radar(ws: WebSocket):
 # ─── 6b. Index benchmarks (live) ────────────────────────────────────────────
 
 @app.get("/api/benchmarks", tags=["Analysis"])
-async def index_benchmarks():
+def index_benchmarks():
     """Trailing 1-year returns for Nifty 50 / Sensex / Nifty Midcap 150.
 
     Replaces a hardcoded frontend table whose Nifty figure had the wrong sign.
@@ -526,11 +709,25 @@ async def login(payload: LoginRequest):
 
 @app.get("/api/auth/profile", tags=["Auth"])
 async def get_profile(current_user: dict = Depends(auth.get_current_user)):
-    """Get current user's profile."""
+    """Get current user's profile.
+
+    created_at used to be datetime.now() — a fresh, fabricated "account created"
+    timestamp on every single request. The JWT carries no such claim, so the
+    honest answer is the stored one, or nothing.
+    """
+    user_id = current_user.get("user_id")
+    created_at = None
+    try:
+        stored = await database.db.get_user(user_id)
+        if stored:
+            created_at = stored.get("created_at")
+    except Exception:
+        created_at = None
+
     return {
-        "user_id": current_user.get("user_id"),
+        "user_id": user_id,
         "email": current_user.get("email"),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": created_at,
     }
 
 
@@ -546,7 +743,7 @@ async def create_portfolio(payload: PortfolioRequest, current_user: dict = Depen
     """Create a new portfolio."""
     user_id = current_user.get("user_id")
     portfolio = await database.db.create_portfolio(user_id, payload.name, payload.description or "")
-    return portfolio
+    return _written(portfolio, "portfolio")
 
 
 @app.get("/api/portfolios", tags=["Portfolio"])
@@ -568,11 +765,16 @@ async def import_csv_portfolio(
     """Upload CSV file with holdings → auto-create portfolio + holdings."""
     user_id = current_user.get("user_id")
 
-    # Read CSV
+    # This had no size limit at all — `(await file.read()).decode()` on an
+    # arbitrary body, so a large upload was an unauthenticated-adjacent OOM.
+    raw = await _read_capped(file, MAX_CSV_BYTES, "CSV over 2MB — split it or trim unused columns.")
     try:
-        content = (await file.read()).decode("utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="That file isn't UTF-8 text. Re-export it as CSV from your broker or spreadsheet.",
+        )
 
     # Parse CSV
     holdings, messages = csv_to_holdings(content)
@@ -580,18 +782,41 @@ async def import_csv_portfolio(
     if not holdings:
         raise HTTPException(status_code=422, detail=f"No valid holdings: {messages}")
 
-    # Create portfolio
-    portfolio = await database.db.create_portfolio(user_id, portfolio_name, f"Imported from CSV ({datetime.now().strftime('%Y-%m-%d')})")
+    # create_portfolio returns None when the insert comes back empty (an RLS
+    # denial, for instance). Subscripting that raised TypeError and surfaced as
+    # an unhandled 500 with a stack trace instead of a usable message.
+    portfolio = await database.db.create_portfolio(
+        user_id, portfolio_name, f"Imported from CSV ({datetime.now().strftime('%Y-%m-%d')})"
+    )
+    if not portfolio or not portfolio.get("id"):
+        raise HTTPException(status_code=502, detail="Couldn't create the portfolio. Try again.")
 
-    # Add holdings
-    for h in holdings:
-        await database.db.add_holding(
-            portfolio["id"],
-            h["ticker"],
-            h["qty"],
-            h["buy_price"],
-            h["sector"],
-        )
+    # Supabase gives us no transaction here, so a failure partway through used to
+    # leave a half-populated portfolio behind AND return a 500 — the user saw an
+    # error but got a portfolio silently missing rows. Roll our own: delete the
+    # portfolio we just made, so the import is all-or-nothing from outside.
+    try:
+        for h in holdings:
+            await database.db.add_holding(
+                portfolio["id"],
+                h["ticker"],
+                h["qty"],
+                h["buy_price"],
+                h["sector"],
+            )
+    except Exception:
+        try:
+            await database.db.delete_portfolio(portfolio["id"])
+        except Exception:
+            # Cleanup failed too — say so rather than implying nothing was written.
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"The import failed partway through and the incomplete portfolio "
+                    f"'{portfolio_name}' could not be removed. Delete it manually before retrying."
+                ),
+            )
+        raise HTTPException(status_code=502, detail="Couldn't import all holdings — nothing was saved. Try again.")
 
     return {
         "portfolio_id": portfolio["id"],
@@ -624,7 +849,7 @@ async def add_holding(
         payload.buy_price,
         payload.sector,
     )
-    return holding
+    return _written(holding, "holding")
 
 
 async def _verify_portfolio_ownership(portfolio_id: str, user_id: str):
@@ -654,12 +879,17 @@ async def analyze_portfolio_live(portfolio_id: str, current_user: dict = Depends
     holdings = await database.db.get_holdings(portfolio_id)
 
     if not holdings:
-        return {"error": "No holdings in portfolio"}
+        # Was a 200 carrying {"error": ...}, which every HTTP client treats as
+        # success — the frontend would try to read .holdings off it.
+        raise HTTPException(status_code=404, detail="No holdings in this portfolio yet.")
 
-    # Fetch current prices and calculate metrics
-    metrics_data = prices.get_portfolio_metrics(holdings)
-
-    # Run through analysis engine
+    # Run through the analysis engine. `prices.get_portfolio_metrics` used to be
+    # merged over the top of this via {**analysis, **metrics_data}; both dicts
+    # carry a "holdings" key, so prices.py's version WON and silently discarded
+    # weightPct, returnPct, priceSource and known — the very fields the UI needs
+    # to hedge an unpriced holding. prices.py also reports a failed lookup as a
+    # real 0% return with no flag at all, so the overwrite replaced honest data
+    # with fabricated data. The engine is the single source of truth here.
     try:
         analysis = engine.analyze(
             [
@@ -672,17 +902,28 @@ async def analyze_portfolio_live(portfolio_id: str, current_user: dict = Depends
             ],
             source="portfolio",
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        # Don't hand the client an internal exception string with a 200 status.
+        raise HTTPException(
+            status_code=500, detail="Couldn't analyze this portfolio. Try again in a moment."
+        )
 
-        return {**analysis, **metrics_data}
-
-    except Exception as e:
-        return {"error": str(e), "metrics": metrics_data}
+    return analysis
 
 
 # ─── 12. Gamification ───────────────────────────────────────────────────────
 
+# The largest single award the client can legitimately report (Daily Ace bonus
+# plus a generous streak multiplier). xp_earned was an unbounded signed int the
+# server passed straight through, so xp_earned=10**9 jumped to level 100 and a
+# negative value could quietly erase progress.
+MAX_XP_PER_AWARD = 200
+
+
 class XPRequest(BaseModel):
-    xp_earned: int
+    xp_earned: int = Field(..., gt=0, le=MAX_XP_PER_AWARD)
 
 
 @app.post("/api/gamification/xp", tags=["Gamification"])
@@ -690,7 +931,7 @@ async def earn_xp(payload: XPRequest, current_user: dict = Depends(auth.get_curr
     """Award XP to user."""
     user_id = current_user.get("user_id")
     result = await database.db.update_xp(user_id, payload.xp_earned)
-    return result
+    return _written(result, "XP update")
 
 
 @app.get("/api/gamification/state", tags=["Gamification"])
@@ -713,7 +954,7 @@ async def unlock_achievement(
     """Unlock an achievement."""
     user_id = current_user.get("user_id")
     result = await database.db.add_achievement(user_id, achievement_id)
-    return result
+    return _written(result, "achievement")
 
 
 # ─── 13. Watchlist ──────────────────────────────────────────────────────────
@@ -764,7 +1005,7 @@ async def get_price_alerts(current_user: dict = Depends(auth.get_current_user)):
 # ─── 15. Stock Prices (Real-time) ────────────────────────────────────────────
 
 @app.get("/api/prices/{ticker}", tags=["Prices"])
-async def get_stock_price(ticker: str):
+def get_stock_price(ticker: str):
     """Get current price for a stock."""
     price_data = prices.get_stock_price(ticker)
     if not price_data:
@@ -773,6 +1014,6 @@ async def get_stock_price(ticker: str):
 
 
 @app.post("/api/prices/batch", tags=["Prices"])
-async def get_batch_prices(tickers: List[str]):
+def get_batch_prices(tickers: List[str]):
     """Get prices for multiple stocks."""
     return prices.get_stock_prices(tickers)

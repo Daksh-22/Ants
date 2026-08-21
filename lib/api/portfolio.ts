@@ -2,15 +2,57 @@
  * Ants API client — every backend call in one place.
  *
  * API_BASE comes from NEXT_PUBLIC_API_URL (deployed) or localhost:8000 (dev).
+ * A deployed build still pointing at loopback fails fast with a message that
+ * names the missing variable, rather than an opaque "Failed to fetch".
+ *
  * Callers must catch. Failures surface to the user as failures — the app no
  * longer substitutes the built-in demo analysis for a real one.
  */
 
 import type { Analysis } from "@/lib/analysis/types";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const CONFIGURED_API_URL = process.env.NEXT_PUBLIC_API_URL?.trim();
+
+export const API_BASE = CONFIGURED_API_URL || "http://localhost:8000";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+
+function isLoopback(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
+/**
+ * A deployed build with NEXT_PUBLIC_API_URL unset — or still pointing at
+ * localhost — used to fall through to localhost:8000 and fail on every call
+ * with an opaque "Failed to fetch". That reads to the user as "the app is
+ * broken" when it's one missing dashboard variable, and it reads to us as a
+ * network blip. NEXT_PUBLIC_* is inlined at build time, so this is decided
+ * once at build and only ever wrong in one direction: a page served from a
+ * real host that is trying to reach the developer's own laptop.
+ */
+function configError(): string | null {
+  if (typeof window === "undefined") return null;
+  if (isLoopback(window.location.hostname)) return null;
+
+  let apiHost: string;
+  try {
+    apiHost = new URL(API_BASE).hostname;
+  } catch {
+    return `NEXT_PUBLIC_API_URL is not a valid URL ("${API_BASE}").`;
+  }
+  if (!isLoopback(apiHost)) return null;
+
+  return CONFIGURED_API_URL
+    ? `This build points at ${API_BASE}, which only exists on the developer's machine. Set NEXT_PUBLIC_API_URL to the deployed backend and redeploy.`
+    : "NEXT_PUBLIC_API_URL was not set when this build was made, so the app is trying to reach a backend on your own machine. Set it in the hosting dashboard and redeploy.";
+}
+
+export class ApiNotConfiguredError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = "ApiNotConfiguredError";
+  }
+}
 
 /**
  * Free-tier hosting spins the backend down when idle, so the first request
@@ -26,22 +68,50 @@ export class ApiTimeoutError extends Error {
   }
 }
 
+/**
+ * FastAPI's `detail` is a string for our own HTTPExceptions but a list of
+ * {loc, msg, type} objects for 422 validation failures. Interpolating that
+ * list into an Error put "[object Object]" in front of the user, which told
+ * them nothing and told us nothing either.
+ */
+function messageFromDetail(detail: unknown, res: Response, path: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => (d && typeof d === "object" ? (d as { msg?: unknown }).msg : d))
+      .filter((m): m is string => typeof m === "string" && m.trim().length > 0);
+    if (msgs.length) return msgs.join("; ");
+  }
+  if (res.status >= 500) return "The server hit an error handling that. Try again in a moment.";
+  return `${res.status} on ${path}`;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<T> {
+  const misconfigured = configError();
+  if (misconfigured) throw new ApiNotConfiguredError(misconfigured);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
     if (!res.ok) {
       const detail = await res.json().then((b) => b?.detail).catch(() => null);
-      throw new Error(detail || `${res.status} on ${path}`);
+      throw new Error(messageFromDetail(detail, res, path));
     }
     return (await res.json()) as T;
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") throw new ApiTimeoutError();
+    // undici and the browser disagree on AbortError's prototype, so match the
+    // name rather than the class — otherwise a timeout escaped as a raw abort.
+    if (err instanceof Error && err.name === "AbortError") throw new ApiTimeoutError();
+    // fetch rejects with a bare TypeError for DNS/CORS/offline. "Failed to
+    // fetch" on its own is the least actionable string in the product.
+    if (err instanceof TypeError) {
+      throw new Error(`Couldn't reach the Ants server at ${API_BASE}. Check your connection.`);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -105,7 +175,9 @@ export interface ResolvedTicker {
   name: string | null;
   sector: string | null;
   cmp: number | null;
-  priceSource: "live" | "reference" | "unpriced";
+  /** "reference" is retired — a stale hardcoded snapshot was being reported
+   *  as a real valuation. It is live or nothing. */
+  priceSource: "live" | "unpriced";
 }
 
 /**
@@ -124,13 +196,46 @@ export function resolveTickers(tickers: string[]): Promise<{ results: ResolvedTi
   });
 }
 
+// ─── Live quotes (re-pricing on demand) ─────────────────────────────────────
+
+export interface LiveQuote {
+  price: number;
+  source: "live" | "unpriced";
+}
+
+export interface QuotesReply {
+  quotes: Record<string, LiveQuote>;
+  asOf?: string;
+}
+
+/**
+ * Current price per ticker, independent of any stored analysis.
+ *
+ * Price alerts are evaluated in the browser, and they used to compare targets
+ * against the quote frozen into the last analysis — so a target could be crossed
+ * hours ago and the alert would still read "not there yet" until the user
+ * re-ran an analysis. This lets the alert sweep re-price first.
+ *
+ * Callers MUST skip any quote whose source is "unpriced": its price is 0 and
+ * firing an alert against it would invent a crossing that never happened.
+ */
+export function fetchLiveQuotes(tickers: string[]): Promise<QuotesReply> {
+  return request<QuotesReply>("/api/quotes", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ tickers }),
+  });
+}
+
 // ─── Risk metrics (real, from price history) ────────────────────────────────
 
 export interface RiskReply {
   /** null when no holding had enough price history to measure */
   risk: {
     volatility_pct: number;
-    sharpe_ratio: number;
+    /** null when the trailing window needed to match the volatility horizon
+     *  wasn't measurable — omit the line rather than mixing horizons */
+    sharpe_ratio: number | null;
     max_drawdown_pct: number;
     beta_vs_nifty: number | null;
     risk_score: number;

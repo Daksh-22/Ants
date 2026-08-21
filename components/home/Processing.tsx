@@ -95,7 +95,7 @@ export function Processing({ onDone, waitFor, onCancel }: ProcessingProps) {
     <motion.div
       animate={{ opacity: fading ? 0 : 1 }}
       transition={{ duration: 0.25 }}
-      className="fixed inset-0 z-40 overflow-y-auto bg-base"
+      className="fixed inset-0 z-[55] overflow-y-auto bg-base"
     >
       <div className="mx-auto flex min-h-full max-w-app flex-col justify-center px-8">
         <p className="mb-3 text-center text-[20px] font-extrabold text-gold">Ants</p>

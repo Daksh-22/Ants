@@ -11,7 +11,12 @@ import { SectionLabel } from "@/components/ui/SectionLabel";
 import { useAppState } from "@/components/app/AppState";
 import { LevelProgress } from "@/components/gamification/LevelProgress";
 import { AchievementCard } from "@/components/gamification/AchievementCard";
-import { ACHIEVEMENT_DEFINITIONS, getProgressForAchievement } from "@/lib/gamification/achievements";
+import { chatCount, benchmarkBeatDays } from "@/lib/gamification/lifetimeCounters";
+import {
+  ACHIEVEMENT_DEFINITIONS,
+  getProgressForAchievement,
+  type AchievementProgressInputs,
+} from "@/lib/gamification/achievements";
 import { DEFAULT_ANALYSIS } from "@/lib/analysis/default";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import { sips } from "@/lib/data/mock";
@@ -69,6 +74,44 @@ export default function ProfilePage() {
 
   const streak = gamification.dailyStreak.current;
   const milestone = nextStreakMilestone(streak);
+
+  // Real counters behind the locked-badge progress bars. Only streak and fixes
+  // used to be supplied, so researcher / market watcher / hawkeye all read 0/N
+  // regardless of what the user had actually done. Counters with no persistent
+  // source are left undefined on purpose — getProgressForAchievement returns
+  // null for those and the card omits the bar rather than asserting zero.
+  const [achievementCounters, setAchievementCounters] = useState<AchievementProgressInputs>({});
+  useEffect(() => {
+    const countArray = (key: string): number | undefined => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(key) ?? "null");
+        return Array.isArray(parsed) ? parsed.length : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const triggeredAlerts = (): number | undefined => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("ants:price-alerts") ?? "null");
+        if (!Array.isArray(parsed)) return undefined;
+        return parsed.filter((a) => a && a.status === "triggered").length;
+      } catch {
+        return undefined;
+      }
+    };
+    setAchievementCounters({
+      streakDays: gamification.dailyStreak.current,
+      fixesCompleted: doneFixes.length,
+      researchedStocks: countArray("ants:researched-tickers"),
+      insightsRead: countArray("ants:insights-read-ids"),
+      priceTargetsHit: triggeredAlerts(),
+      // Both of these now have real lifetime sources (lib/gamification/
+      // lifetimeCounters.ts). Before that they had none, so their badges were
+      // unreachable and their bars were hidden.
+      chatQueries: chatCount(),
+      benchmarkDaysBeating: benchmarkBeatDays(),
+    });
+  }, [gamification.dailyStreak.current, doneFixes.length]);
 
   const stats = [
     { label: "Net worth", value: formatINR(analysis.summary.totalValue), className: "text-primary" },
@@ -205,12 +248,8 @@ export default function ProfilePage() {
                   index={unlocked.length + i}
                   isLocked
                   progress={(() => {
-                    const p = getProgressForAchievement(
-                      d.id,
-                      gamification.dailyStreak.current,
-                      doneFixes.length
-                    );
-                    return { current: p.progress, max: p.maxProgress };
+                    const p = getProgressForAchievement(d.id, achievementCounters);
+                    return p ? { current: p.progress, max: p.maxProgress } : undefined;
                   })()}
                 />
               ))}

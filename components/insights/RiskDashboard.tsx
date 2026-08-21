@@ -125,14 +125,18 @@ export function RiskDashboard({ riskMetrics, holdingVolatilities, index = 0 }: R
                 </span>
               )}
             </div>
-            <p className="mt-1 text-[12px] text-muted">
-              Sharpe <span className="font-semibold text-secondary tabular">{riskMetrics.sharpe_ratio}</span>{" "}
-              — {sharpeRead(riskMetrics.sharpe_ratio)} return for the risk taken
-            </p>
-            <p className="mt-0.5 text-[12px] text-muted">
-              Beta <span className="font-semibold text-secondary tabular">{riskMetrics.beta_vs_nifty}</span>{" "}
-              vs Nifty 50
-            </p>
+            {riskMetrics.sharpe_ratio !== null && (
+              <p className="mt-1 text-[12px] text-muted">
+                Sharpe <span className="font-semibold text-secondary tabular">{riskMetrics.sharpe_ratio}</span>{" "}
+                — {sharpeRead(riskMetrics.sharpe_ratio)} return for the risk taken
+              </p>
+            )}
+            {riskMetrics.beta_vs_nifty !== null && (
+              <p className="mt-0.5 text-[12px] text-muted">
+                Beta <span className="font-semibold text-secondary tabular">{riskMetrics.beta_vs_nifty}</span>{" "}
+                vs Nifty 50
+              </p>
+            )}
           </div>
         </Card>
       </Reveal>
@@ -168,7 +172,11 @@ export function RiskDashboard({ riskMetrics, holdingVolatilities, index = 0 }: R
       {holdingVolatilities.length > 0 && (
         <Reveal index={index + 3}>
           <Card>
-            <p className="mb-3 text-[13px] font-semibold text-primary">Biggest risk contributors</p>
+            <p className="text-[13px] font-semibold text-primary">Biggest risk contributors</p>
+            {/* These are now shares of one whole and sum to 100% across the
+                measured holdings, so the subtitle can say what they are. They
+                used to be raw weighted-volatility points wearing a % sign. */}
+            <p className="mb-3 text-[11px] text-muted">share of measured portfolio risk</p>
             <div className="space-y-2.5">
               {holdingVolatilities.slice(0, 3).map((h) => (
                 <div key={h.ticker} className="flex items-center justify-between gap-3">

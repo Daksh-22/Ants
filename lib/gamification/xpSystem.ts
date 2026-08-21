@@ -80,8 +80,17 @@ export function getXpProgressInLevel(totalXp: number): {
   const band = bandForXp(Math.max(0, totalXp));
   const perLevel = xpPerLevel(band);
   const intoBand = Math.max(0, totalXp - band.minXp);
-  const current = Math.round(intoBand % perLevel);
   const needed = Math.round(perLevel);
+
+  // getLevelForXp clamps at 100 but this kept cycling intoBand % perLevel past
+  // the top band's ceiling, so every 1,000 XP after 45,000 replayed a full bar
+  // fill that resolved to nothing: "Level 100 · Whale · 600/1000", then a snap
+  // back to 0/1000, forever. At the cap the bar is simply full and stays full.
+  if (getLevelForXp(totalXp) >= 100) {
+    return { current: needed, needed, percent: 100 };
+  }
+
+  const current = Math.round(intoBand % perLevel);
   return { current, needed, percent: Math.min(100, (current / needed) * 100) };
 }
 
@@ -98,5 +107,46 @@ export function getLevelBandName(level: number): string {
 export function isNewDayForCheckIn(lastCheckInDate: string): boolean {
   const lastDate = new Date(lastCheckInDate);
   const today = new Date();
+  if (Number.isNaN(lastDate.getTime())) return true;
   return lastDate.toDateString() !== today.toDateString();
+}
+
+/** local midnight for a date — the boundary the check-in gate already uses */
+function startOfLocalDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/**
+ * Whole calendar days between two instants, counted by local midnights so the
+ * result never depends on the time of day.
+ */
+export function calendarDaysBetween(from: Date, to: Date): number {
+  const MS_PER_DAY = 86_400_000;
+  return Math.round((startOfLocalDay(to) - startOfLocalDay(from)) / MS_PER_DAY);
+}
+
+/**
+ * What a check-in today does to the streak.
+ *
+ * The gate above is a CALENDAR-day test while the continuation test used to be
+ * a rolling 48-HOUR window, and the two disagree by a full day. Checking in
+ * Monday 23:00 and again Wednesday 22:00 is 47h, so a completely skipped
+ * Tuesday extended the streak — while Monday 01:00 to Wednesday 23:00 is 70h
+ * and reset it, despite being the same one-missed-day pattern. Time of day
+ * decided whether a skipped day counted.
+ *
+ * Now it is calendar days throughout, matching what the UI promises ("miss two
+ * days running and your streak resets"):
+ *   1 day  → consecutive, extend
+ *   2 days → exactly one day missed, the documented single-day grace, extend
+ *   3+     → two or more missed, reset to 1
+ */
+export function nextStreak(current: number, lastCheckInDate: string, now = new Date()): number {
+  const last = new Date(lastCheckInDate);
+  if (Number.isNaN(last.getTime())) return 1;
+
+  const gap = calendarDaysBetween(last, now);
+  if (gap <= 0) return Math.max(1, current); // same day — the gate should have caught this
+  if (gap <= 2) return current + 1;
+  return 1;
 }
