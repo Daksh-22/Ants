@@ -68,7 +68,7 @@ export const ACHIEVEMENT_DEFINITIONS: Record<string, Omit<Achievement, 'unlocked
   first_investor: {
     id: 'first_investor',
     name: 'First Investor',
-    description: 'Make your first purchase via Ants',
+    description: 'Make your first purchase via Sift',
     icon: '🚀',
   },
   social_butterfly: {
@@ -77,11 +77,11 @@ export const ACHIEVEMENT_DEFINITIONS: Record<string, Omit<Achievement, 'unlocked
     description: 'Compare your portfolio with a peer',
     icon: '🦋',
   },
-  ask_ants_master: {
-    id: 'ask_ants_master',
-    name: 'Ask Ants Master',
-    description: 'Ask 10 questions via Ask Ants',
-    icon: '🐜',
+  ask_sift_master: {
+    id: 'ask_sift_master',
+    name: 'Ask Sift Master',
+    description: 'Ask 10 questions via Ask Sift',
+    icon: '✨',
     progress: 0,
     maxProgress: 10,
   },

@@ -104,7 +104,7 @@ function HomeRoute() {
   if (!hydrated) {
     return (
       <div className="fixed inset-0 z-[55] flex items-center justify-center bg-base">
-        <span className="text-[20px] font-extrabold text-gold">Ants</span>
+        <span className="text-[20px] font-extrabold text-gold">Sift</span>
       </div>
     );
   }

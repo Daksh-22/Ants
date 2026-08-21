@@ -24,7 +24,7 @@ const SUGGESTIONS = [
 ];
 
 /**
- * Ask Ants — the AI assistant. Floating gold button on results; opens a chat
+ * Ask Sift — the AI assistant. Floating gold button on results; opens a chat
  * sheet. Answers come from the backend: Claude grounded in the RAG knowledge
  * base + this user's actual analysis. Offline → a retryable error bubble.
  */
@@ -56,7 +56,7 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
     } catch {
       setMessages((m) => [
         ...m,
-        { role: "ants", text: "Ants is catching its breath — the brain's offline right now.", failed: true },
+        { role: "ants", text: "Sift is catching its breath — the brain's offline right now.", failed: true },
       ]);
     } finally {
       setBusy(false);
@@ -76,11 +76,11 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={() => setOpen(true)}
-          aria-label="Ask Ants"
+          aria-label="Ask Sift"
           className="pointer-events-auto ml-auto flex items-center gap-2 rounded-full fill-gold-gradient px-4 py-3 text-[14px] font-bold text-ink shadow-cta"
         >
           <Sparkles size={17} strokeWidth={2.4} />
-          Ask Ants
+          Ask Sift
         </motion.button>
       </div>
 
@@ -106,7 +106,7 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
               <div className="flex items-center justify-between px-6 pb-3 pt-4">
                 <p className="flex items-center gap-2 text-[16px] font-bold text-primary">
                   <Sparkles size={16} className="text-gold" />
-                  Ask Ants
+                  Ask Sift
                 </p>
                 <button onClick={() => setOpen(false)} aria-label="Close" className="-m-1 p-1 text-muted">
                   <X size={20} strokeWidth={2.4} />
@@ -119,7 +119,7 @@ export function AskAnts({ analysis }: { analysis: Analysis }) {
                   <div className="pt-2">
                     <p className="text-[13px] leading-relaxed text-secondary">
                       Ask anything about your portfolio or investing. Answers use your actual
-                      holdings and the Ants knowledge base.
+                      holdings and the Sift knowledge base.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {SUGGESTIONS.map((s) => (

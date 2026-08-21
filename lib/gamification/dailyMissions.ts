@@ -67,9 +67,9 @@ export const MISSION_POOL: MissionDef[] = [
     isDone: () => activityToday("research") >= 1,
   },
   {
-    id: "ask-ants",
+    id: "ask-sift",
     title: "Ask a real question",
-    detail: "Put one doubt to Ask Ants — that's what it's for.",
+    detail: "Put one doubt to Ask Sift — that's what it's for.",
     xp: XP_REWARDS.MISSION_LEARN,
     isDone: () => activityToday("chat") >= 1,
   },

@@ -14,8 +14,8 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Ants",
-  description: "Investing that finally feels like it belongs to you.",
+  title: "Sift",
+  description: "Separate signal from noise in your portfolio.",
 };
 
 export const viewport: Viewport = {
