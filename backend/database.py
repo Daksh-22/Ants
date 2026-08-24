@@ -383,6 +383,57 @@ class Database:
         result = self.client.table("price_alerts").select("*").eq("user_id", user_id).eq("status", "active").execute()
         return result.data if result.data else []
 
+    # ─── Anonymous cohort ranking ────────────────────────────────────────────
+    #
+    # No user id, no ticker, no portfolio value breakdown — just the two
+    # numbers /rank needs (returnsPct, totalValue) with a timestamp. This is
+    # intentionally the minimum that makes a real percentile possible.
+
+    MIN_COHORT_SIZE = 20  # below this, a "percentile" is a percentile of noise
+
+    async def log_anonymous_return(self, returns_pct: float, total_value: float) -> None:
+        """Fire-and-forget: record one anonymous sample every time an analysis
+        runs, so /api/rank has a real cohort to compare against instead of the
+        fabricated one /rank shipped without (see app/rank/page.tsx). Never
+        raises — a failure here must not break the analysis response it rides
+        along with.
+        """
+        if not self.client:
+            return
+        try:
+            self.client.table("market_cohorts").insert({
+                "returns_pct": returns_pct,
+                "total_value": total_value,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception:
+            pass
+
+    async def get_percentile_rank(self, returns_pct: float) -> dict:
+        """Where `returns_pct` sits against every anonymous sample logged so
+        far. available:false below MIN_COHORT_SIZE — a percentile computed
+        from a handful of other people is exactly the invented-cohort problem
+        /rank was shipped without in the first place; better to say "not
+        enough data yet" than hand back a number that only looks real.
+        """
+        if not self.client:
+            return {"available": False, "sampleSize": 0}
+
+        try:
+            result = self.client.table("market_cohorts").select("returns_pct").execute()
+            rows = result.data or []
+        except Exception:
+            return {"available": False, "sampleSize": 0}
+
+        sample = [float(r["returns_pct"]) for r in rows if r.get("returns_pct") is not None]
+        n = len(sample)
+        if n < self.MIN_COHORT_SIZE:
+            return {"available": False, "sampleSize": n}
+
+        below_or_equal = sum(1 for r in sample if r <= returns_pct)
+        percentile = round(below_or_equal / n * 100, 1)
+        return {"available": True, "percentile": percentile, "sampleSize": n}
+
 
 # Global instance
 db = Database(supabase)

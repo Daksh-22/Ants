@@ -4,10 +4,11 @@ Ants backend — FastAPI service powering the Ants frontend.
     uvicorn main:app --reload --port 8000        (from backend/)
 
 Domains:
-  1. Portfolio analysis  — real math (engine.py) + optional Claude polish (ai.py)
-  2. Screenshot OCR      — Claude vision → holdings → analysis
+  1. Portfolio analysis  — real math (engine.py) + optional Gemini polish (ai.py)
+  2. Screenshot OCR      — Gemini vision → holdings → analysis
   3. Ask Ants            — RAG-grounded chat (rag.py + ai.py)
   4. Index benchmarks    — live Nifty 50 / Sensex / Midcap trailing returns
+  5. Cohort ranking      — real anonymous percentile (database.py), not invented
 
 Deliberately NOT implemented — these return 503 rather than simulated data,
 because each previously returned invented values the UI presented as real:
@@ -16,7 +17,7 @@ because each previously returned invented values the UI presented as real:
   * Swarm Radar momentum feed           — SWARM_RADAR_ENABLED
   * Accounts / portfolios               — needs SUPABASE_URL + SUPABASE_KEY
 
-Env: ANTHROPIC_API_KEY (optional — enables AI), ANTHROPIC_MODEL,
+Env: GEMINI_API_KEY (optional — enables AI), GEMINI_MODEL,
      ALLOWED_ORIGINS (comma-separated, for the deployed frontend), PORT.
      Read from the process env first, then backend/.env.local, then
      backend/.env — so a hosting dashboard always overrides a local file.
@@ -202,7 +203,20 @@ def analyze_portfolio(payload: AnalyzeRequest):
         analysis = engine.analyze([p.model_dump() for p in payload.positions], source=payload.source)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    return ai.polish_analysis(analysis)
+    polished = ai.polish_analysis(analysis)
+
+    # Anonymous cohort sample for /api/rank — no identity, just the two
+    # numbers. This is a sync def (FastAPI runs it in a worker thread), so
+    # there's no existing event loop to conflict with asyncio.run here.
+    # Never let this affect the response the user is waiting on.
+    try:
+        asyncio.run(database.db.log_anonymous_return(
+            polished["summary"]["returnsPct"], polished["summary"]["totalValue"]
+        ))
+    except Exception:
+        pass
+
+    return polished
 
 
 @app.get("/api/analyze/demo", tags=["Analysis"])
@@ -652,6 +666,18 @@ def index_benchmarks():
     Returns available:false rather than a placeholder when the fetch fails.
     """
     return benchmarks.get_benchmarks()
+
+
+@app.get("/api/rank", tags=["Analysis"])
+async def get_rank(returnPct: float):
+    """Where this return sits against every other anonymous analysis run
+    through this app — a real cohort percentile, not an invented one.
+
+    available:false until database.Database.MIN_COHORT_SIZE real samples
+    exist. Requires SUPABASE_URL + SUPABASE_KEY; without them this always
+    returns available:false rather than fabricating a percentile.
+    """
+    return await database.db.get_percentile_rank(returnPct)
 
 
 # ─── 7. Authentication ──────────────────────────────────────────────────────

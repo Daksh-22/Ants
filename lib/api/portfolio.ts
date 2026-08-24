@@ -339,3 +339,22 @@ export function checkTip(ticker: string, positions: RawPosition[]): Promise<TipC
     body: JSON.stringify({ ticker, positions }),
   });
 }
+
+// ─── Anonymous cohort ranking ────────────────────────────────────────────────
+
+export interface RankReply {
+  available: boolean;
+  /** only present when available is true */
+  percentile?: number;
+  /** how many real analyses this was computed against */
+  sampleSize: number;
+}
+
+/**
+ * Where this return sits against every other anonymous analysis run through
+ * the app. available:false until the server has enough real samples to make
+ * a percentile honest — never substitute a placeholder for it.
+ */
+export function fetchRank(returnPct: number): Promise<RankReply> {
+  return request<RankReply>(`/api/rank?returnPct=${encodeURIComponent(returnPct)}`);
+}

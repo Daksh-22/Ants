@@ -316,6 +316,10 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
     worst = min(holdings, key=lambda h: h["returnPct"])
     if worst["returnPct"] < -20:
         score -= 6
+        # The rupee amount actually lost so far — not the percentage, the
+        # money. "Down 34%" is an abstraction; "down ₹11,980" is a gut punch,
+        # and it's the number that should make someone actually act.
+        loss_rupees = worst["invested"] - worst["value"]
         flags.append({
             "id": "deep-loser",
             "severity": "red",
@@ -323,6 +327,10 @@ def analyze(positions: list[dict[str, Any]], source: str = "manual") -> dict[str
             "body": (
                 f"Holding a {abs(worst['returnPct']):.0f}% loser isn't a strategy, it's avoidance. "
                 f"Decide: would you buy {worst['name']} today at this price? If not, why are you holding it?"
+            ),
+            "cost_of_inaction": (
+                f"You are down ₹{loss_rupees:,.0f} on this position. "
+                f"Hoping it recovers is not a strategy."
             ),
             "fix": {
                 "id": "deep-loser",

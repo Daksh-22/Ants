@@ -61,7 +61,7 @@ def search_knowledge(query: str) -> str:
 @mcp.tool()
 def ask_ants(question: str) -> str:
     """Ask the Ants assistant an investing question. Grounded in the knowledge
-    base; uses Claude when ANTHROPIC_API_KEY is set, otherwise returns the
+    base; uses Gemini when GEMINI_API_KEY is set, otherwise returns the
     relevant knowledge-base passages."""
     return json.dumps(ai.chat(question), ensure_ascii=False)
 

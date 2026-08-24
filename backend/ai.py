@@ -1,7 +1,7 @@
 """
-Ants AI layer — every Claude call in one place, all optional.
+Ants AI layer — every Gemini call in one place, all optional.
 
-Set ANTHROPIC_API_KEY and the app gets: vision OCR of holdings screenshots,
+Set GEMINI_API_KEY and the app gets: vision OCR of holdings screenshots,
 analysis copy rewritten in the Ants voice, and a RAG-grounded chat assistant.
 Without a key every function degrades to a deterministic fallback, so the
 product always works — the key just makes it smarter.
@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import rag
 
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 _client = None
 
@@ -28,7 +28,7 @@ _last_error: Optional[str] = None
 
 
 def have_ai() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(os.environ.get("GEMINI_API_KEY"))
 
 
 def last_error() -> Optional[str]:
@@ -36,15 +36,16 @@ def last_error() -> Optional[str]:
 
 
 def _note_failure(exc: Exception) -> None:
-    """Record an AI failure. AuthenticationError means the key is bad, not absent."""
+    """Record an AI failure. A 401/403 means the key is bad, not absent."""
     global _last_error
     name = type(exc).__name__
-    if name == "AuthenticationError":
-        _last_error = "ANTHROPIC_API_KEY is set but rejected by the API (401). Check or regenerate the key."
-    elif name == "NotFoundError":
-        _last_error = f"Model '{MODEL}' was not found. Check ANTHROPIC_MODEL."
-    elif name == "RateLimitError":
-        _last_error = "Rate limited by the Anthropic API (429)."
+    code = getattr(exc, "code", None)
+    if code in (401, 403):
+        _last_error = "GEMINI_API_KEY is set but rejected by the API (401/403). Check or regenerate the key."
+    elif code == 404:
+        _last_error = f"Model '{MODEL}' was not found. Check GEMINI_MODEL."
+    elif code == 429:
+        _last_error = "Rate limited by the Gemini API (429)."
     else:
         _last_error = f"{name}: {exc}"
 
@@ -57,13 +58,13 @@ def _note_success() -> None:
 def _get_client():
     global _client
     if _client is None and have_ai():
-        from anthropic import Anthropic
-        _client = Anthropic()
+        from google import genai
+        _client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     return _client
 
 
 def _call(client, **kwargs):
-    """Single funnel for every Claude call, so success clears the error too.
+    """Single funnel for every Gemini call, so success clears the error too.
 
     Nothing ever reset _last_error. One transient 429 therefore pinned
     /healthz red for the rest of the process lifetime and kept rewording
@@ -72,11 +73,11 @@ def _call(client, **kwargs):
     "screenshot reading is down" instead of "couldn't read any holdings".
 
     It also broke the repair loop this field exists for — after an operator
-    replaced a rejected key, /healthz kept reporting the old 401 until the
+    replaced a rejected key, /healthz kept reporting the old error until the
     service was restarted, so the fix looked like it had not worked.
     """
     try:
-        msg = client.messages.create(model=MODEL, **kwargs)
+        msg = client.models.generate_content(model=MODEL, **kwargs)
     except Exception as exc:
         print(f"[AI ERROR] {type(exc).__name__}: {exc}")
         _note_failure(exc)
@@ -86,14 +87,16 @@ def _call(client, **kwargs):
 
 
 def _text_of(msg) -> str:
-    """Text from a response, guarding the refusal stop reason.
+    """Text from a response, guarding empty/safety-filtered candidates.
 
-    Current models can decline a request: HTTP 200, stop_reason 'refusal',
-    empty or partial content. Reading content[0] blindly breaks on those.
+    Gemini can return zero candidates (blocked prompt) or a candidate with no
+    text part. `.text` raises in some of those shapes rather than returning
+    an empty string, so every caller would need its own guard without this.
     """
-    if getattr(msg, "stop_reason", None) == "refusal":
+    try:
+        return (msg.text or "").strip()
+    except Exception:
         return ""
-    return "".join(b.text for b in msg.content if b.type == "text")
 
 
 VOICE = (
@@ -105,79 +108,78 @@ VOICE = (
 
 # ─── 1. Screenshot OCR → holdings ───────────────────────────────────────────
 
-_OCR_TOOL = {
-    "name": "report_holdings",
-    "description": "Report every holding visible in the portfolio screenshot.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "holdings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "ticker": {"type": "string", "description": "NSE ticker or best-guess symbol, uppercase"},
-                        "qty": {"type": "number", "description": "quantity/units held"},
-                        "avg": {"type": "number", "description": "average buy price in ₹"},
-                    },
-                    "required": ["ticker", "qty", "avg"],
+_OCR_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "holdings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "NSE ticker or best-guess symbol, uppercase"},
+                    "qty": {"type": "number", "description": "quantity/units held"},
+                    "avg": {"type": "number", "description": "average buy price in ₹"},
                 },
+                "required": ["ticker", "qty", "avg"],
             },
         },
-        "required": ["holdings"],
     },
+    "required": ["holdings"],
 }
+
+_OCR_INSTRUCTIONS = (
+    "This is a screenshot of an Indian broker/investment app (Growth, Zerodha Kite/Console, Kuvera, INDmoney, ET Money, Shoonya, Angel, 5Paisa, or similar). "
+    "CAREFULLY extract EVERY equity/ETF/mutual fund holding visible. For each:\n"
+    "1. TICKER: NSE symbol in UPPERCASE (e.g., TCS, INFY, SBIN, RELIANCE). For mutual funds use the fund's short code.\n"
+    "2. QUANTITY: Number of shares/units held. Look for columns labeled 'Qty', 'Shares', 'Units', 'Quantity', 'Holdings'.\n"
+    "3. AVERAGE BUY PRICE: Price per unit in ₹. Look for 'Avg Price', 'Avg Cost', 'Buy Price', 'Cost Price', 'Avg Buy'. "
+    "If not visible, calculate: Total Invested Value ÷ Quantity = Average Price.\n"
+    "\n"
+    "CRITICAL RULES:\n"
+    "- Skip header rows, footer rows, total rows, and summary rows.\n"
+    "- Skip rows that show portfolio totals (like 'Total: ₹...', 'Overall P&L', 'Net Value').\n"
+    "- Only extract positions where all three values (ticker, qty, avg) are present or calculable.\n"
+    "- If you see duplicate tickers, sum the quantities.\n"
+    "- Ensure prices are per unit, not total value.\n"
+    "- For fractional holdings, round to 2 decimal places.\n"
+    "- If any value is missing or unclear, skip that row entirely.\n"
+    "\n"
+    "Return ONLY valid holdings. Better to extract 5 correct holdings than 10 with errors."
+)
 
 
 def extract_holdings(image_b64: str, media_type: str) -> Optional[list[dict[str, Any]]]:
-    """Claude vision → [{ticker, qty, avg}]. None when AI unavailable or unreadable."""
+    """Gemini vision → [{ticker, qty, avg}]. None when AI unavailable or unreadable."""
     client = _get_client()
     if client is None:
         return None
     try:
+        from google.genai import types
+
+        image_part = types.Part.from_bytes(data=base64.standard_b64decode(image_b64), mime_type=media_type)
         msg = _call(
             client,
-            max_tokens=1500,
-            tools=[_OCR_TOOL],
-            tool_choice={"type": "tool", "name": "report_holdings"},
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
-                    {"type": "text", "text": (
-                        "This is a screenshot of an Indian broker/investment app (Growth, Zerodha Kite/Console, Kuvera, INDmoney, ET Money, Shoonya, Angel, 5Paisa, or similar). "
-                        "CAREFULLY extract EVERY equity/ETF/mutual fund holding visible. For each:\n"
-                        "1. TICKER: NSE symbol in UPPERCASE (e.g., TCS, INFY, SBIN, RELIANCE). For mutual funds use the fund's short code.\n"
-                        "2. QUANTITY: Number of shares/units held. Look for columns labeled 'Qty', 'Shares', 'Units', 'Quantity', 'Holdings'.\n"
-                        "3. AVERAGE BUY PRICE: Price per unit in ₹. Look for 'Avg Price', 'Avg Cost', 'Buy Price', 'Cost Price', 'Avg Buy'. "
-                        "If not visible, calculate: Total Invested Value ÷ Quantity = Average Price.\n"
-                        "\n"
-                        "CRITICAL RULES:\n"
-                        "- Skip header rows, footer rows, total rows, and summary rows.\n"
-                        "- Skip rows that show portfolio totals (like 'Total: ₹...', 'Overall P&L', 'Net Value').\n"
-                        "- Only extract positions where all three values (ticker, qty, avg) are present or calculable.\n"
-                        "- If you see duplicate tickers, sum the quantities.\n"
-                        "- Ensure prices are per unit, not total value.\n"
-                        "- For fractional holdings, round to 2 decimal places.\n"
-                        "- If any value is missing or unclear, skip that row entirely.\n"
-                        "\n"
-                        "Return ONLY valid holdings. Better to extract 5 correct holdings than 10 with errors."
-                    )},
-                ],
-            }],
+            contents=[image_part, _OCR_INSTRUCTIONS],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_json_schema=_OCR_SCHEMA,
+                max_output_tokens=1500,
+            ),
         )
-        for block in msg.content:
-            if block.type == "tool_use" and block.name == "report_holdings":
-                holdings = block.input.get("holdings", [])
-                clean = [
-                    h for h in holdings
-                    if str(h.get("ticker", "")).strip() and float(h.get("qty") or 0) > 0 and float(h.get("avg") or 0) > 0
-                ]
-                return clean or None
+        text = _text_of(msg)
+        if not text:
+            return None
+        payload = json.loads(text)
+        holdings = payload.get("holdings", [])
+        clean = [
+            h for h in holdings
+            if str(h.get("ticker", "")).strip() and float(h.get("qty") or 0) > 0 and float(h.get("avg") or 0) > 0
+        ]
+        return clean or None
     except Exception as exc:
+        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
         _note_failure(exc)
         return None
-    return None
 
 
 # ─── 2. Generate the analysis narrative ─────────────────────────────────────
@@ -285,7 +287,11 @@ ANALYST_BRIEF = (
     "in a diversified large cap is not the same risk as 30% in a single micro cap.\n"
     "- Correlated bets the user may not see as correlated: several PSU banks, "
     "several defence names, several new-age loss-making tech listings.\n"
-    "- Positions deep underwater, and whether the rest of the book can carry them.\n"
+    "- Positions deep underwater (see deepLosers), and whether the rest of the book "
+    "can carry them. When a ticker appears in deepLosers, cite its "
+    "costOfInactionRupees figure aggressively and by name — the exact rupees "
+    "already lost, not just the percentage. That money is already gone; say so "
+    "plainly instead of softening it into an abstraction.\n"
     "- A single winner carrying the whole portfolio's return.\n"
     "- No international or index exposure at all.\n"
     "- Too few holdings to be diversified, or so many that nothing moves the needle.\n"
@@ -328,6 +334,20 @@ def _analysis_facts(analysis: dict[str, Any]) -> dict[str, Any]:
 
     priced = [h for h in holdings if h.get("priceSource") != "unpriced"]
 
+    # Positions down more than 20% with a real price behind them — the exact
+    # rupee loss (invested - value), so the model can cite money already lost
+    # instead of a percentage the reader has to do arithmetic on themselves.
+    deep_losers = [
+        {
+            "ticker": h["ticker"],
+            "name": h["name"],
+            "returnPct": h.get("returnPct"),
+            "costOfInactionRupees": round(float(h.get("invested") or 0) - float(h.get("value") or 0), 2),
+        }
+        for h in holdings
+        if h.get("priceSource") != "unpriced" and (h.get("returnPct") or 0) < -20
+    ]
+
     return {
         "summary": analysis.get("summary"),
         "engineScore": analysis.get("score"),
@@ -352,6 +372,7 @@ def _analysis_facts(analysis: dict[str, Any]) -> dict[str, Any]:
             h["ticker"] for h in holdings if h.get("priceSource") == "unpriced"
         ],
         "pricingNote": (analysis.get("pricing") or {}).get("note"),
+        "deepLosers": deep_losers,
     }
 
 
@@ -418,23 +439,25 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
         return analysis
 
     try:
+        from google.genai import types
+
         facts = _analysis_facts(analysis)
         msg = _call(
             client,
-            max_tokens=4000,
-            system=ANALYST_BRIEF,
-            output_config={"format": {"type": "json_schema", "schema": _ANALYSIS_SCHEMA}},
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Review this portfolio. Every figure here is already computed from "
-                    "live prices — use these numbers and no others.\n\n"
-                    + json.dumps(facts, ensure_ascii=False)
-                ),
-            }],
+            contents=(
+                "Review this portfolio. Every figure here is already computed from "
+                "live prices — use these numbers and no others.\n\n"
+                + json.dumps(facts, ensure_ascii=False)
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=ANALYST_BRIEF,
+                response_mime_type="application/json",
+                response_json_schema=_ANALYSIS_SCHEMA,
+                max_output_tokens=4000,
+            ),
         )
 
-        text = _text_of(msg).strip()
+        text = _text_of(msg)
         if not text:
             return analysis
         payload = json.loads(text)
@@ -495,6 +518,7 @@ def polish_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
         analysis["generatedBy"] = "ai"
         return analysis
     except Exception as exc:
+        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
         _note_failure(exc)
         return analysis
 
@@ -509,36 +533,37 @@ def polish_verdict(check: dict[str, Any], holdings: list[dict[str, Any]]) -> dic
     if client is None:
         return check
     try:
+        from google.genai import types
+
         slim = [{k: h[k] for k in ("name", "sector", "weightPct", "returnPct")} for h in holdings]
         msg = _call(
             client,
-            max_tokens=300,
-            system=VOICE,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "A user asked whether to buy a tipped stock. Engine facts (all true, keep them):\n"
-                    + json.dumps({k: v for k, v in check.items() if k != "verdict"})
-                    + "\nTheir holdings:\n" + json.dumps(slim)
-                    + "\n\nCurrent verdict:\n" + check["verdict"]
-                    + "\n\nRewrite the verdict — same conclusion and tone class "
-                    f"('{check['tone']}'), sharper and more personal to their book. Max 3 "
-                    "sentences. Return ONLY the rewritten verdict text."
-                ),
-            }],
+            contents=(
+                "A user asked whether to buy a tipped stock. Engine facts (all true, keep them):\n"
+                + json.dumps({k: v for k, v in check.items() if k != "verdict"})
+                + "\nTheir holdings:\n" + json.dumps(slim)
+                + "\n\nCurrent verdict:\n" + check["verdict"]
+                + "\n\nRewrite the verdict — same conclusion and tone class "
+                f"('{check['tone']}'), sharper and more personal to their book. Max 3 "
+                "sentences. Return ONLY the rewritten verdict text."
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=VOICE,
+                max_output_tokens=300,
+            ),
         )
-        text = _text_of(msg).strip()
+        text = _text_of(msg)
         if 20 < len(text) < 600:
             check["verdict"] = text
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
     return check
 
 
 # ─── 3. Ask Ants — RAG-grounded chat ────────────────────────────────────────
 
 OFFLINE_ANSWER = (
-    "The AI brain is offline right now (no ANTHROPIC_API_KEY on the server), but here's "
+    "The AI brain is offline right now (no GEMINI_API_KEY on the server), but here's "
     "what the knowledge base says:\n\n{digest}\n\nSet the API key and I'll give you a real, "
     "personalized answer."
 )
@@ -571,22 +596,27 @@ def chat(question: str, analysis: Optional[dict[str, Any]] = None) -> dict[str, 
         context_parts.append("THE USER'S PORTFOLIO ANALYSIS:\n" + json.dumps(slim))
 
     try:
+        from google.genai import types
+
         msg = _call(
             client,
-            max_tokens=700,
-            system=VOICE + (
-                " Answer the user's investing question using the knowledge base and their portfolio "
-                "context when relevant. Be concrete and short (under 150 words). You are not a SEBI-"
-                "registered advisor — for buy/sell calls on specific securities, give the framework, "
-                "not the order."
+            contents="\n\n".join(context_parts + [f"QUESTION: {question}"]),
+            config=types.GenerateContentConfig(
+                system_instruction=VOICE + (
+                    " Answer the user's investing question using the knowledge base and their portfolio "
+                    "context when relevant. Be concrete and short (under 150 words). You are not a SEBI-"
+                    "registered advisor — for buy/sell calls on specific securities, give the framework, "
+                    "not the order."
+                ),
+                max_output_tokens=700,
             ),
-            messages=[{"role": "user", "content": "\n\n".join(context_parts + [f"QUESTION: {question}"])}],
         )
-        answer = _text_of(msg).strip()
+        answer = _text_of(msg)
         return {"answer": answer, "sources": sources, "aiUsed": True}
     except Exception as exc:  # key set but call failed — degrade gracefully from RAG
         print(f"[AI ERROR] {type(exc).__name__}: {exc}")
-        # Synthesize answer from knowledge base + analysis instead of returning error
+        # Synthesize an answer from the knowledge base + analysis instead of
+        # surfacing a raw error mid-demo.
         synthesis_parts = []
         if chunks:
             synthesis_parts.append("From our knowledge base:\n" + "\n\n".join(
