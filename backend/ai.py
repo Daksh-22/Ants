@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import rag
 
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
 
 _client = None
 
