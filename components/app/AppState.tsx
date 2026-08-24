@@ -169,6 +169,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setIsDemoState(localStorage.getItem(IS_DEMO_KEY) === "true");
       const gamState = readJSON<GamificationState>(GAMIFICATION_KEY);
       if (gamState) setGamificationState(gamState);
+
+      // Cold-start wake-up: Render's free tier spins the backend down after
+      // idle. A silent fetch to /healthz on app load warms it so the first real
+      // analysis doesn't timeout. No error handling — if it fails, the next real
+      // call will just trigger a fresh cold start.
+      (async () => {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        fetch(`${apiUrl}/healthz`).catch(() => {});
+      })();
     } catch {
       // localStorage unavailable — stay in the empty state
     }
