@@ -215,7 +215,11 @@ async def healthz():
     return {
         "status": "ok",
         "aiEnabled": ai.have_ai(),
-        "aiModel": ai.MODEL,
+        # The model actually in use, which is not necessarily GEMINI_MODEL: a
+        # configured name the key does not serve gets replaced by a discovered
+        # one. Reporting the config here hid exactly that mismatch.
+        "aiModel": ai.active_model(),
+        "aiConfiguredModel": ai.MODEL,
         "aiLastError": ai.last_error(),
         "knowledgeChunks": rag.chunk_count(),
         "accountsEnabled": database.db.client is not None,

@@ -19,6 +19,25 @@ import rag
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
+# Which model names to try, best first. A Gemini API key does not expose every
+# published model — the set depends on the key's project and API version — so a
+# single hardcoded name fails with a 404 that looks exactly like "AI is off":
+# every feature silently drops to its fallback while /healthz still reports
+# aiEnabled true. That shipped once already (GEMINI_MODEL=gemini-2.5-flash was
+# rejected as not found), so the model is now discovered against the key instead
+# of assumed. An explicit GEMINI_MODEL is always tried first.
+_MODEL_CANDIDATES = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-flash-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-002",
+)
+
+# Resolved once per process, then reused. None until the first resolve attempt.
+_resolved_model: Optional[str] = None
+
 _client = None
 
 # Last AI failure, surfaced by /healthz. A configured-but-rejected key looks
@@ -43,7 +62,10 @@ def _note_failure(exc: Exception) -> None:
     if code in (401, 403):
         _last_error = "GEMINI_API_KEY is set but rejected by the API (401/403). Check or regenerate the key."
     elif code == 404:
-        _last_error = f"Model '{MODEL}' was not found. Check GEMINI_MODEL."
+        _last_error = (
+            f"Model '{active_model()}' was not found for this key. "
+            "Tried auto-discovery; check GEMINI_MODEL or the key's project access."
+        )
     elif code == 429:
         _last_error = "Rate limited by the Gemini API (429)."
     else:
@@ -63,6 +85,55 @@ def _get_client():
     return _client
 
 
+def _resolve_model(client) -> str:
+    """The best generateContent-capable model this key actually exposes.
+
+    Asks the API what exists rather than trusting a hardcoded name, because a
+    name the key does not serve 404s and degrades every AI feature to its
+    fallback with no visible cause. Falls back to MODEL if listing fails, so a
+    listing outage cannot make things worse than the old behaviour.
+    """
+    global _resolved_model
+    if _resolved_model is not None:
+        return _resolved_model
+
+    try:
+        available: list[str] = []
+        for m in client.models.list():
+            actions = getattr(m, "supported_actions", None) or []
+            # Vertex-style entries omit supported_actions; treat those as usable
+            # rather than filtering every model out.
+            if actions and "generateContent" not in actions:
+                continue
+            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            if name:
+                available.append(name)
+
+        env_model = os.environ.get("GEMINI_MODEL", "").strip()
+        # Ordered preference: explicit config, then known-good, then anything
+        # flash-like (cheap + fast), then whatever exists at all.
+        for candidate in ([env_model] if env_model else []) + list(_MODEL_CANDIDATES):
+            if candidate in available:
+                _resolved_model = candidate
+                break
+        else:
+            flash = [n for n in available if "flash" in n and "thinking" not in n]
+            _resolved_model = (flash or available or [MODEL])[0]
+
+        if _resolved_model != MODEL:
+            print(f"[AI] resolved model '{_resolved_model}' (configured '{MODEL}')")
+    except Exception as exc:
+        print(f"[AI WARN] model listing failed, using '{MODEL}': {type(exc).__name__}: {exc}")
+        _resolved_model = MODEL
+
+    return _resolved_model
+
+
+def active_model() -> str:
+    """Model actually in use — what /healthz should report, not the raw config."""
+    return _resolved_model or MODEL
+
+
 def _call(client, **kwargs):
     """Single funnel for every Gemini call, so success clears the error too.
 
@@ -77,7 +148,7 @@ def _call(client, **kwargs):
     service was restarted, so the fix looked like it had not worked.
     """
     try:
-        msg = client.models.generate_content(model=MODEL, **kwargs)
+        msg = client.models.generate_content(model=_resolve_model(client), **kwargs)
     except Exception as exc:
         print(f"[AI ERROR] {type(exc).__name__}: {exc}")
         _note_failure(exc)
