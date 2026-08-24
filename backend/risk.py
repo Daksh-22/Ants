@@ -32,6 +32,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+import requests
+
 from engine import _norm
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -47,6 +49,14 @@ BENCHMARK_SYMBOL = "^NSEI"  # Nifty 50, for beta
 
 _cache: dict[str, tuple["TickerRisk", float]] = {}
 _bench_cache: tuple[dict[str, float], float] | None = None
+
+
+def _create_session() -> requests.Session:
+  session = requests.Session()
+  session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  })
+  return session
 
 
 @dataclass
@@ -99,7 +109,8 @@ def _closes(symbol: str) -> list[tuple[str, float]]:
     try:
         import yfinance as yf
 
-        hist = yf.Ticker(symbol).history(period=HISTORY_PERIOD)
+        session = _create_session()
+        hist = yf.Ticker(symbol, session=session).history(period=HISTORY_PERIOD)
         if hist is None or len(hist) < MIN_BARS:
             return []
         out: list[tuple[str, float]] = []

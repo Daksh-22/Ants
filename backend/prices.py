@@ -8,10 +8,19 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import json
 import os
+import requests
 
 
 # Cache file path (optional, for offline MVP)
 CACHE_FILE = ".price_cache.json"
+
+
+def _create_session() -> requests.Session:
+  session = requests.Session()
+  session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  })
+  return session
 
 
 class PriceCache:
@@ -86,8 +95,9 @@ def get_stock_price(ticker: str) -> Optional[Dict]:
         # Add .NS for NSE tickers if not already present
         symbol = ticker if ticker.endswith((".NS", ".BO", ".BSE")) else f"{ticker}.NS"
 
-        # Fetch from yfinance
-        stock = yf.Ticker(symbol)
+        # Fetch from yfinance with custom session
+        session = _create_session()
+        stock = yf.Ticker(symbol, session=session)
         info = stock.info or {}
 
         # Get current price

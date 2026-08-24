@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, Check, PenLine, RotateCcw } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Loader2, PenLine, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { Header } from "@/components/layout/Header";
 import { Card } from "@/components/ui/Card";
@@ -114,6 +114,7 @@ export function Results({ analysis }: { analysis: Analysis }) {
     reset,
     gamification,
     unlockAchievement,
+    isSyncing,
   } = useAppState();
   // No `?? DEFAULT_ANALYSIS`. Results used to fall back to the built-in demo
   // book whenever `analyzed` was true but the stored analysis was missing or
@@ -278,12 +279,16 @@ export function Results({ analysis }: { analysis: Analysis }) {
                     stale ? "text-muted" : "text-teal"
                   )}
                 >
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      stale ? "bg-muted" : "bg-teal"
-                    )}
-                  />
+                  {isSyncing ? (
+                    <Loader2 size={11} className="animate-spin text-gold" />
+                  ) : (
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        stale ? "bg-muted" : "bg-teal"
+                      )}
+                    />
+                  )}
                   {label} · all {analysis.pricing.total} holdings
                   {stale && (
                     <Link href="/home?edit=1" className="font-semibold text-gold underline underline-offset-2">

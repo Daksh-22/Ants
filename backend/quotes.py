@@ -33,6 +33,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import requests
+
 from engine import KNOWN_STOCKS, _norm
 
 # yfinance is chatty on failures; we handle them ourselves
@@ -51,6 +53,14 @@ LIVE_PRICES_ENABLED = os.environ.get("LIVE_PRICES", "1") != "0"
 
 _price_cache: dict[str, tuple[float, float]] = {}          # ticker -> (price, fetched_at)
 _profile_cache: dict[str, tuple[str, str, float]] = {}     # ticker -> (name, sector, fetched_at)
+
+
+def _create_session() -> requests.Session:
+  session = requests.Session()
+  session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  })
+  return session
 
 
 @dataclass
@@ -282,7 +292,8 @@ def _fetch_one(key: str) -> Quote | None:
 
         for symbol in candidates:
             try:
-                tk = yf.Ticker(symbol)
+                session = _create_session()
+                tk = yf.Ticker(symbol, session=session)
 
                 if price is None:
                     found = _price_from(tk)

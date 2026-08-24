@@ -55,6 +55,8 @@ interface AppState {
   /** true when `analysis` is the fallback demo, not the user's real data — the
    *  backend was unreachable when this was set. Results shows a banner + retry. */
   isDemo: boolean;
+  /** true when background price refresh is in flight */
+  isSyncing: boolean;
   /** gamification state: levels, XP, achievements, streaks */
   gamification: GamificationState;
   /** live queue of "+N XP" moments — rendered globally as floating toasts */
@@ -108,6 +110,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [doneFixes, setDoneFixes] = useState<string[]>([]);
   const [analysis, setAnalysisState] = useState<Analysis | null>(null);
   const [isDemo, setIsDemoState] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [gamification, setGamificationState] = useState<GamificationState>(DEFAULT_GAMIFICATION);
   const [hydrated, setHydrated] = useState(false);
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([]);
@@ -135,7 +138,34 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       const fixes = readJSON<string[]>(FIXES_KEY);
       if (Array.isArray(fixes)) setDoneFixes(fixes.filter((x): x is string => typeof x === "string"));
       const stored = readJSON<Analysis>(ANALYSIS_KEY);
-      if (stored && stored.summary && Array.isArray(stored.flags)) setAnalysisState(stored);
+      if (stored && stored.summary && Array.isArray(stored.flags)) {
+        setAnalysisState(stored);
+
+        // silently refresh prices in background
+        const holdings = stored.holdings || [];
+        if (holdings.length > 0) {
+          setIsSyncing(true);
+          const positions = holdings.map(h => ({
+            ticker: h.ticker,
+            qty: h.qty || 0,
+            avg: h.avg || 0,
+          }));
+
+          (async () => {
+            try {
+              const { analyzePositions } = await import("@/lib/api/portfolio");
+              const fresh = await analyzePositions(positions);
+              if (fresh && fresh.summary && Array.isArray(fresh.flags)) {
+                setAnalysisState(fresh);
+              }
+            } catch {
+              // silent fail — keep cached analysis
+            } finally {
+              setIsSyncing(false);
+            }
+          })();
+        }
+      }
       setIsDemoState(localStorage.getItem(IS_DEMO_KEY) === "true");
       const gamState = readJSON<GamificationState>(GAMIFICATION_KEY);
       if (gamState) setGamificationState(gamState);
@@ -394,6 +424,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         doneFixes,
         analysis,
         isDemo,
+        isSyncing,
         gamification,
         xpEvents,
         dismissXpEvent,

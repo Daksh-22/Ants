@@ -22,6 +22,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+import requests
+
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # Index returns move slowly; an hour-old number is honest, a fabricated one never is.
@@ -42,6 +44,14 @@ _cache: dict[str, Any] | None = None
 _cached_at: float = 0.0
 
 
+def _create_session() -> requests.Session:
+  session = requests.Session()
+  session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  })
+  return session
+
+
 def _fetch_one(key: str) -> tuple[str, dict[str, Any]] | None:
     """Trailing 1-year total return for one index, or None if unavailable."""
     try:
@@ -51,7 +61,8 @@ def _fetch_one(key: str) -> tuple[str, dict[str, Any]] | None:
 
     label, symbol = INDEXES[key]
     try:
-        hist = yf.Ticker(symbol).history(period="1y")
+        session = _create_session()
+        hist = yf.Ticker(symbol, session=session).history(period="1y")
         # A handful of bars means a bad symbol or a throttled response, not a
         # real year — refuse rather than compute a garbage return.
         if hist is None or len(hist) < 20:
