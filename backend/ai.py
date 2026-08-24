@@ -26,13 +26,19 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 # aiEnabled true. That shipped once already (GEMINI_MODEL=gemini-2.5-flash was
 # rejected as not found), so the model is now discovered against the key instead
 # of assumed. An explicit GEMINI_MODEL is always tried first.
+# Current-generation names lead. The first version of this list topped out at
+# gemini-2.5-flash, which is a year behind the API and is exactly the name this
+# key rejects — so every fallback was also stale and the fallthrough had nothing
+# newer to reach for. Keep the newest stable first and the alias late, since an
+# alias silently changes which model you are billed for and how it behaves.
 _MODEL_CANDIDATES = (
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
     "gemini-flash-latest",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-002",
 )
 
 # Resolved once per process, then reused. None until the first resolve attempt.
