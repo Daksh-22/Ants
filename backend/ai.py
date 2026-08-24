@@ -105,7 +105,11 @@ def _resolve_model(client) -> str:
             # rather than filtering every model out.
             if actions and "generateContent" not in actions:
                 continue
-            name = (getattr(m, "name", "") or "").removeprefix("models/")
+            # Not str.removeprefix: that needs Python 3.9+, and the deployed
+            # Python version isn't pinned anywhere in this repo.
+            name = getattr(m, "name", "") or ""
+            if name.startswith("models/"):
+                name = name[len("models/"):]
             if name:
                 available.append(name)
 
