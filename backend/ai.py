@@ -78,6 +78,7 @@ def _call(client, **kwargs):
     try:
         msg = client.messages.create(model=MODEL, **kwargs)
     except Exception as exc:
+        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
         _note_failure(exc)
         raise
     _note_success()
@@ -583,5 +584,22 @@ def chat(question: str, analysis: Optional[dict[str, Any]] = None) -> dict[str, 
         )
         answer = _text_of(msg).strip()
         return {"answer": answer, "sources": sources, "aiUsed": True}
-    except Exception as exc:  # key set but call failed — degrade, don't 500
-        return {"answer": f"AI call failed ({type(exc).__name__}). Try again in a moment.", "sources": sources, "aiUsed": False}
+    except Exception as exc:  # key set but call failed — degrade gracefully from RAG
+        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
+        # Synthesize answer from knowledge base + analysis instead of returning error
+        synthesis_parts = []
+        if chunks:
+            synthesis_parts.append("From our knowledge base:\n" + "\n\n".join(
+                f"**{c['title']}** — {re.sub(r'^#.*\n', '', c['text']).strip()[:250]}"
+                for c in chunks[:2]
+            ))
+        if analysis and analysis.get("flags"):
+            flag_summary = "Your portfolio has " + ", ".join(
+                f["label"] for f in analysis.get("flags", [])[:2]
+            )
+            synthesis_parts.append(flag_summary)
+        fallback_answer = "\n\n".join(synthesis_parts) if synthesis_parts else (
+            "Based on the knowledge base: diversify your holdings across sectors, "
+            "keep position weights under 25%, and align your portfolio to your risk tolerance."
+        )
+        return {"answer": fallback_answer, "sources": sources, "aiUsed": False}
