@@ -221,6 +221,11 @@ async def healthz():
         "aiModel": ai.active_model(),
         "aiConfiguredModel": ai.MODEL,
         "aiLastError": ai.last_error(),
+        # What model discovery actually saw. A resolved name that still 404s and
+        # a failed listing that fell back to the same name look identical
+        # otherwise, and telling them apart from outside is the difference
+        # between fixing this in one request and guessing.
+        "aiModelDiscovery": ai.model_diagnostics(),
         "knowledgeChunks": rag.chunk_count(),
         "accountsEnabled": database.db.client is not None,
         "brokerLinkEnabled": AA_ENABLED,

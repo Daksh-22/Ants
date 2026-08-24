@@ -38,6 +38,12 @@ _MODEL_CANDIDATES = (
 # Resolved once per process, then reused. None until the first resolve attempt.
 _resolved_model: Optional[str] = None
 
+# What discovery actually saw, surfaced on /healthz. Without this, a resolved
+# name that still 404s is indistinguishable from a listing call that failed and
+# fell back to the same name — and guessing between those two wastes real time.
+_available_models: list[str] = []
+_listing_error: Optional[str] = None
+
 _client = None
 
 # Last AI failure, surfaced by /healthz. A configured-but-rejected key looks
@@ -93,7 +99,7 @@ def _resolve_model(client) -> str:
     fallback with no visible cause. Falls back to MODEL if listing fails, so a
     listing outage cannot make things worse than the old behaviour.
     """
-    global _resolved_model
+    global _resolved_model, _available_models, _listing_error
     if _resolved_model is not None:
         return _resolved_model
 
@@ -113,6 +119,9 @@ def _resolve_model(client) -> str:
             if name:
                 available.append(name)
 
+        _available_models = available
+        _listing_error = None
+
         env_model = os.environ.get("GEMINI_MODEL", "").strip()
         # Ordered preference: explicit config, then known-good, then anything
         # flash-like (cheap + fast), then whatever exists at all.
@@ -128,6 +137,8 @@ def _resolve_model(client) -> str:
             print(f"[AI] resolved model '{_resolved_model}' (configured '{MODEL}')")
     except Exception as exc:
         print(f"[AI WARN] model listing failed, using '{MODEL}': {type(exc).__name__}: {exc}")
+        _listing_error = f"{type(exc).__name__}: {exc}"
+        _available_models = []
         _resolved_model = MODEL
 
     return _resolved_model
@@ -136,6 +147,27 @@ def _resolve_model(client) -> str:
 def active_model() -> str:
     """Model actually in use — what /healthz should report, not the raw config."""
     return _resolved_model or MODEL
+
+
+def model_diagnostics() -> dict[str, Any]:
+    """What discovery saw, for /healthz. Model names are not secrets; the key
+    is never included.
+
+    Resolves on first call so /healthz reports real discovery data instead of
+    empty fields on a freshly started process — the whole point is to be able
+    to diagnose this without waiting for a user to trigger an AI feature.
+    """
+    if _resolved_model is None:
+        client = _get_client()
+        if client is not None:
+            _resolve_model(client)
+    return {
+        "resolved": _resolved_model,
+        "listingError": _listing_error,
+        "availableCount": len(_available_models),
+        # Capped: some keys expose 50+ models and this is a health payload.
+        "available": _available_models[:40],
+    }
 
 
 def _call(client, **kwargs):
