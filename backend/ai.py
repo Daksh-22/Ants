@@ -105,7 +105,7 @@ def _get_client():
     return _client
 
 
-def _resolve_model(client) -> str:
+def _resolve_model(client, exclude: frozenset[str] = frozenset()) -> str:
     """The best generateContent-capable model this key actually exposes.
 
     Asks the API what exists rather than trusting a hardcoded name, because a
@@ -114,7 +114,7 @@ def _resolve_model(client) -> str:
     listing outage cannot make things worse than the old behaviour.
     """
     global _resolved_model, _available_models, _listing_error
-    if _resolved_model is not None:
+    if _resolved_model is not None and _resolved_model not in exclude:
         return _resolved_model
 
     available: list[str] = []
@@ -146,7 +146,7 @@ def _resolve_model(client) -> str:
     # Ordered preference: explicit config first, then known-good names.
     preference = ([env_model] if env_model else []) + list(_MODEL_CANDIDATES)
 
-    usable = lambda n: n not in _failed_models  # noqa: E731
+    usable = lambda n: n not in _failed_models and n not in exclude  # noqa: E731
 
     # 1. a preferred name the listing confirmed exists
     picked = next((c for c in preference if c in available and usable(c)), None)
@@ -208,22 +208,35 @@ def _call(client, **kwargs):
     """
     global _resolved_model
     last_exc: Optional[Exception] = None
+    tried: set[str] = set()
 
-    # A 404 means "this key cannot use that model", which is recoverable by
-    # trying another name — so retire the name and re-resolve rather than
-    # surfacing a failure the user can do nothing about. Bounded, because each
-    # attempt is a real API round trip on a user-facing request.
+    # Two failures mean "this key cannot use THAT model" rather than "AI is
+    # unavailable", and both are recoverable by trying a different name:
+    #   404 — the key has no access to the model at all. Permanent, so the name
+    #         is retired process-wide.
+    #   429 — no quota for that model. Free-tier quota is per-model and Google
+    #         does not publish which models a given key can actually use, so the
+    #         only way to find one that works is to try. NOT retired permanently,
+    #         because quota recovers.
+    # Anything else (401, 500, ...) fails immediately: a different model name
+    # cannot fix a bad key or a server fault, and retrying would just add
+    # latency to a request the user is waiting on.
     for _ in range(3):
-        model = _resolve_model(client)
+        model = _resolve_model(client, exclude=frozenset(tried))
         try:
             msg = client.models.generate_content(model=model, **kwargs)
         except Exception as exc:
             print(f"[AI ERROR] model={model} {type(exc).__name__}: {exc}")
             _note_failure(exc)
             last_exc = exc
-            if getattr(exc, "code", None) == 404:
-                _failed_models.add(model)
-                _resolved_model = None  # force a different pick next iteration
+            code = getattr(exc, "code", None)
+            if code in (404, 429):
+                tried.add(model)
+                if code == 404:
+                    _failed_models.add(model)
+                # Drop the cache so the next pass picks a genuinely different
+                # name; a working one then becomes the cached choice.
+                _resolved_model = None
                 continue
             raise
         _note_success()
