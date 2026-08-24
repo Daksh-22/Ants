@@ -44,6 +44,14 @@ _resolved_model: Optional[str] = None
 _available_models: list[str] = []
 _listing_error: Optional[str] = None
 
+# Models this key has already 404d on. Discovery alone is not enough: a model
+# can be listed (or simply assumed, when listing returns nothing) and still be
+# unusable — published names get retired, and a key's access can be narrower
+# than the catalogue. Recording the failures lets _call fall through to the next
+# candidate instead of returning the same 404 forever, which is what left every
+# AI feature on its fallback with a green health check.
+_failed_models: set[str] = set()
+
 _client = None
 
 # Last AI failure, surfaced by /healthz. A configured-but-rejected key looks
@@ -103,45 +111,54 @@ def _resolve_model(client) -> str:
     if _resolved_model is not None:
         return _resolved_model
 
+    available: list[str] = []
     try:
-        available: list[str] = []
         for m in client.models.list():
             actions = getattr(m, "supported_actions", None) or []
             # Vertex-style entries omit supported_actions; treat those as usable
             # rather than filtering every model out.
             if actions and "generateContent" not in actions:
                 continue
+            # Names arrive fully qualified and the shape differs by backend:
+            # "models/x" on the Gemini API, "publishers/google/models/x" on
+            # Vertex. Keep only the trailing id so it can match a candidate.
             # Not str.removeprefix: that needs Python 3.9+, and the deployed
             # Python version isn't pinned anywhere in this repo.
             name = getattr(m, "name", "") or ""
-            if name.startswith("models/"):
-                name = name[len("models/"):]
+            if "/" in name:
+                name = name.rsplit("/", 1)[-1]
             if name:
                 available.append(name)
-
-        _available_models = available
         _listing_error = None
-
-        env_model = os.environ.get("GEMINI_MODEL", "").strip()
-        # Ordered preference: explicit config, then known-good, then anything
-        # flash-like (cheap + fast), then whatever exists at all.
-        for candidate in ([env_model] if env_model else []) + list(_MODEL_CANDIDATES):
-            if candidate in available:
-                _resolved_model = candidate
-                break
-        else:
-            flash = [n for n in available if "flash" in n and "thinking" not in n]
-            _resolved_model = (flash or available or [MODEL])[0]
-
-        if _resolved_model != MODEL:
-            print(f"[AI] resolved model '{_resolved_model}' (configured '{MODEL}')")
     except Exception as exc:
-        print(f"[AI WARN] model listing failed, using '{MODEL}': {type(exc).__name__}: {exc}")
+        print(f"[AI WARN] model listing failed: {type(exc).__name__}: {exc}")
         _listing_error = f"{type(exc).__name__}: {exc}"
-        _available_models = []
-        _resolved_model = MODEL
 
-    return _resolved_model
+    _available_models = available
+
+    env_model = os.environ.get("GEMINI_MODEL", "").strip()
+    # Ordered preference: explicit config first, then known-good names.
+    preference = ([env_model] if env_model else []) + list(_MODEL_CANDIDATES)
+
+    usable = lambda n: n not in _failed_models  # noqa: E731
+
+    # 1. a preferred name the listing confirmed exists
+    picked = next((c for c in preference if c in available and usable(c)), None)
+    if picked is None:
+        # 2. any flash variant the listing confirmed — cheap and fast
+        flash = [n for n in available if "flash" in n and "thinking" not in n and usable(n)]
+        # 3. anything at all the listing confirmed
+        rest = [n for n in available if usable(n)]
+        # 4. listing gave us nothing (empty or failed) — try the candidates
+        #    blind, so a retry after a 404 attempts a genuinely different name
+        #    instead of the same one again.
+        blind = [c for c in preference if usable(c)]
+        picked = (flash or rest or blind or [MODEL])[0]
+
+    _resolved_model = picked
+    if picked != MODEL:
+        print(f"[AI] resolved model '{picked}' (configured '{MODEL}')")
+    return picked
 
 
 def active_model() -> str:
@@ -183,14 +200,30 @@ def _call(client, **kwargs):
     replaced a rejected key, /healthz kept reporting the old error until the
     service was restarted, so the fix looked like it had not worked.
     """
-    try:
-        msg = client.models.generate_content(model=_resolve_model(client), **kwargs)
-    except Exception as exc:
-        print(f"[AI ERROR] {type(exc).__name__}: {exc}")
-        _note_failure(exc)
-        raise
-    _note_success()
-    return msg
+    global _resolved_model
+    last_exc: Optional[Exception] = None
+
+    # A 404 means "this key cannot use that model", which is recoverable by
+    # trying another name — so retire the name and re-resolve rather than
+    # surfacing a failure the user can do nothing about. Bounded, because each
+    # attempt is a real API round trip on a user-facing request.
+    for _ in range(3):
+        model = _resolve_model(client)
+        try:
+            msg = client.models.generate_content(model=model, **kwargs)
+        except Exception as exc:
+            print(f"[AI ERROR] model={model} {type(exc).__name__}: {exc}")
+            _note_failure(exc)
+            last_exc = exc
+            if getattr(exc, "code", None) == 404:
+                _failed_models.add(model)
+                _resolved_model = None  # force a different pick next iteration
+                continue
+            raise
+        _note_success()
+        return msg
+
+    raise last_exc if last_exc else RuntimeError("no usable Gemini model")
 
 
 def _text_of(msg) -> str:
