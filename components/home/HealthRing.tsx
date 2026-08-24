@@ -8,50 +8,44 @@ interface HealthRingProps {
   stroke?: number;
 }
 
-/** semantic color ramp — the ring should look as bad as a bad score IS */
 function toneFor(score: number): { stroke: string; text: string; glow: string } {
-  if (score < 40) return { stroke: "var(--accent-red)", text: "text-red", glow: "rgba(255,92,92,0.35)" };
-  if (score < 70) return { stroke: "var(--accent-amber)", text: "text-amber", glow: "rgba(255,176,32,0.35)" };
-  if (score < 90) return { stroke: "var(--accent-gold)", text: "text-gold", glow: "rgba(232,160,32,0.4)" };
-  return { stroke: "var(--accent-teal)", text: "text-teal", glow: "rgba(0,214,158,0.4)" };
+  if (score < 40) return { stroke: "var(--accent-red)", text: "text-red", glow: "rgba(255,92,92,0.4)" };
+  if (score < 70) return { stroke: "var(--accent-amber)", text: "text-amber", glow: "rgba(255,176,32,0.4)" };
+  if (score < 90) return { stroke: "var(--accent-gold)", text: "text-gold", glow: "rgba(232,160,32,0.45)" };
+  return { stroke: "var(--accent-teal)", text: "text-teal", glow: "rgba(0,214,158,0.45)" };
 }
 
-/**
- * Circular portfolio-health ring. Fills to `score`% over the count-up, with
- * the number animating in the middle. Color ramps red → amber → gold → teal
- * so a disaster portfolio never renders in the same triumphant gold as a 95.
- */
-export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
-  const live = useCountUp(score, 1300);
+export function HealthRing({ score, size = 84, stroke = 7 }: HealthRingProps) {
+  const live = useCountUp(score, 1200);
+  const center = size / 2;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
   const offset = circumference * (1 - Math.min(Math.max(live, 0), 100) / 100);
   const tone = toneFor(score);
 
   return (
-    <div className="relative shrink-0" style={{ width: size + 16, height: size + 16 }}>
-      {/* precision grid frame */}
-      <div className="absolute inset-0 rounded-full border border-[rgba(232,160,32,0.15)]" style={{
-        backgroundImage: `
-          linear-gradient(0deg, rgba(232,160,32,0.04) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(232,160,32,0.04) 1px, transparent 1px)
-        `,
-        backgroundSize: '24px 24px',
-      }} />
+    <div className="relative flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
+      {/* Subtle background ambient ring aura */}
+      <div
+        className="pointer-events-none absolute inset-1 rounded-full blur-md opacity-40 transition-colors duration-500"
+        style={{ backgroundColor: tone.stroke }}
+      />
 
-      <div className="absolute inset-8 flex items-center justify-center">
-        <svg width={size} height={size} className="-rotate-90 [filter:drop-shadow(0_0_6px_var(--ring-glow))]" style={{ ["--ring-glow" as string]: tone.glow }}>
+      {/* SVG Gauge */}
+      <svg width={size} height={size} className="-rotate-90">
+        {/* Track */}
         <circle
-          cx={size / 2}
-          cy={size / 2}
+          cx={center}
+          cy={center}
           r={r}
           fill="none"
-          stroke="var(--border-subtle)"
+          stroke="rgba(255, 255, 255, 0.08)"
           strokeWidth={stroke}
         />
+        {/* Progress fill */}
         <circle
-          cx={size / 2}
-          cy={size / 2}
+          cx={center}
+          cy={center}
           r={r}
           fill="none"
           stroke={tone.stroke}
@@ -59,13 +53,18 @@ export function HealthRing({ score, size = 76, stroke = 7 }: HealthRingProps) {
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
-          style={{ transition: "stroke 0.4s ease" }}
+          style={{ transition: "stroke-dashoffset 0.6s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.4s ease" }}
         />
       </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center px-1">
-          <span className={`font-bold leading-tight tabular ${tone.text}`} style={{ fontSize: `${size * 0.24}px` }}>{Math.round(live)}</span>
-          <span className="text-[8px] text-muted leading-none">/100</span>
-        </div>
+
+      {/* Centered Score Display */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none">
+        <span className={`text-[26px] font-extrabold tracking-tight tabular leading-none ${tone.text}`}>
+          {Math.round(live)}
+        </span>
+        <span className="mt-0.5 text-[10px] font-bold uppercase tracking-widest text-muted">
+          /100
+        </span>
       </div>
     </div>
   );

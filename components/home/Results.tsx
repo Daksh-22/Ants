@@ -308,12 +308,21 @@ export function Results({ analysis }: { analysis: Analysis }) {
           <Card className={cn("flex items-center gap-4", pulse && "animate-gold-pulse")}>
             <HealthRing score={score} />
             <div className="min-w-0">
-              <p className="text-[18px] font-semibold text-primary">
+              <p className="text-[20px] font-bold text-primary">
                 {scoreLabelFor(score, analysis.scoreLabel)}
               </p>
-              <p className={cn("mt-0.5 text-[14px]", attentionRemaining === 0 ? "text-teal" : "text-muted")}>
-                {attentionText}
-              </p>
+              <div className="mt-1.5">
+                {attentionRemaining === 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-teal-dim px-2.5 py-0.5 text-[12px] font-semibold text-teal shadow-[0_0_12px_rgba(0,214,158,0.35)]">
+                    <Check size={12} strokeWidth={3} />
+                    Fully Optimized
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-amber-dim px-2.5 py-0.5 text-[12px] font-semibold text-amber">
+                    {attentionText}
+                  </span>
+                )}
+              </div>
             </div>
           </Card>
           {analysis.flags.length > 0 && (
