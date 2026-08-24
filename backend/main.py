@@ -79,17 +79,47 @@ app = FastAPI(
 _default_origins = "http://localhost:3000,http://127.0.0.1:3000"
 IS_PRODUCTION = os.environ.get("ENVIRONMENT", "development").strip().lower() == "production"
 
+# Vercel mints a NEW hostname for every single deployment
+# (ants-<random-hash>-<scope>.vercel.app), so an exact-match ALLOWED_ORIGINS
+# list goes stale the moment you redeploy: the browser's Origin no longer
+# appears in the list, the preflight is refused, and fetch rejects with a bare
+# TypeError. The client reports that as "Couldn't reach the Ants server", which
+# is indistinguishable from the backend being down — so the obvious next move
+# is to redeploy, which mints yet another hostname and reproduces the failure.
+# That loop cost a full debugging session. Matching this project's deployments
+# by pattern is stable across redeploys and ends the loop.
+#
+# This MUST stay scoped to this project's own hostnames. Never widen it to
+# something like `.*\.vercel\.app` — allow_credentials=True means any origin
+# this matches can read authenticated responses, so a wildcard would hand that
+# to every page hosted on Vercel. Starlette fullmatch()es this pattern.
+#
+# The middle segment allows hyphens because Vercel's branch URLs carry the
+# branch name (ants-git-main-<scope>.vercel.app), not just a hash. The required
+# `-daksh-s-projects22` suffix is what keeps this scoped to this account.
+_PROJECT_ORIGIN_REGEX = r"https://(?:ants-delta|ants-[a-z0-9-]+-daksh-s-projects22)\.vercel\.app"
+
+# Escape hatch for renaming the project or adding a custom domain without a
+# code change. Same rule applies: keep it narrow.
+_configured_origin_regex = os.environ.get("ALLOWED_ORIGIN_REGEX", "").strip() or _PROJECT_ORIGIN_REGEX
+
 # The any-localhost-port regex is a development convenience: it lets `next dev`
 # work on whatever port it grabs. It was OR'd with allow_origins unconditionally,
 # so the deployed API also accepted CREDENTIALED cross-origin requests from
 # http://localhost:<anything> — any other app or notebook running on a user's
-# machine could read their authenticated responses. In production the explicit
-# ALLOWED_ORIGINS list is the only thing honoured.
-_dev_origin_regex = None if IS_PRODUCTION else r"http://(localhost|127\.0\.0\.1):\d+"
+# machine could read their authenticated responses. In production only the
+# explicit ALLOWED_ORIGINS list and the project-scoped pattern are honoured.
+_dev_origin_regex = None if IS_PRODUCTION else r"http://(?:localhost|127\.0\.0\.1):\d+"
+
+# One combined pattern — CORSMiddleware accepts only a single regex. Each branch
+# is wrapped so alternation can't leak across branches under fullmatch.
+_origin_regex = "|".join(
+    f"(?:{p})" for p in (_configured_origin_regex, _dev_origin_regex) if p
+) or None
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=_dev_origin_regex,
+    allow_origin_regex=_origin_regex,
     allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
